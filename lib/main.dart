@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
 
 void main() {
@@ -34,8 +34,8 @@ class DB {
 
   static Future<Database> get database async {
     if (_db != null) return _db!;
-    final path = join(await getDatabasesPath(), 'ethiopian_sales.db');
-    _db = await openDatabase(path, version: 1, onCreate: _create);
+    final dbPath = p.join(await getDatabasesPath(), 'ethiopian_sales.db');
+    _db = await openDatabase(dbPath, version: 1, onCreate: _create);
     return _db!;
   }
 
@@ -187,8 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => loading = false);
   }
 
-  double get total =>
-      cart.fold(0.0, (s, c) => s + c.price * c.qty);
+  double get total => cart.fold(0.0, (s, c) => s + c.price * c.qty);
   int get totalItems => cart.fold(0, (s, c) => s + c.qty);
 
   Map<String, List<CartItem>> get grouped {
@@ -282,8 +281,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             fontSize: 16, color: Colors.white)),
                     subtitle: Text(
                         '${item.price.toStringAsFixed(0)} ብር',
-                        style:
-                            const TextStyle(color: Colors.amber)),
+                        style: const TextStyle(color: Colors.amber)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -306,8 +304,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         IconButton(
                           icon: const Icon(Icons.add_circle,
                               color: Colors.greenAccent, size: 32),
-                          onPressed: () =>
-                              setState(() => item.qty++),
+                          onPressed: () => setState(() => item.qty++),
                         ),
                       ],
                     ),
@@ -327,10 +324,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text('ዕቃዎች: $totalItems',
-                      style:
-                          const TextStyle(color: Colors.white70)),
-                  Text(
-                      'ጠቅላላ: ${total.toStringAsFixed(0)} ብር',
+                      style: const TextStyle(color: Colors.white70)),
+                  Text('ጠቅላላ: ${total.toStringAsFixed(0)} ብር',
                       style: const TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
@@ -380,8 +375,7 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 
   void _showForm({Map<String, dynamic>? existing}) {
-    final nameCtrl =
-        TextEditingController(text: existing?['name'] ?? '');
+    final nameCtrl = TextEditingController(text: existing?['name'] ?? '');
     final priceCtrl = TextEditingController(
         text: existing != null
             ? (existing['price'] as num).toStringAsFixed(0)
@@ -430,15 +424,12 @@ class _MenuScreenState extends State<MenuScreen> {
             child: const Text('ሰርዝ'),
           ),
           ElevatedButton(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
             onPressed: () async {
               final name = nameCtrl.text.trim();
-              final price =
-                  double.tryParse(priceCtrl.text.trim()) ?? 0;
-              final cat = catCtrl.text.trim().isEmpty
-                  ? 'ሌላ'
-                  : catCtrl.text.trim();
+              final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
+              final cat =
+                  catCtrl.text.trim().isEmpty ? 'ሌላ' : catCtrl.text.trim();
               if (name.isEmpty || price <= 0) return;
 
               if (existing == null) {
@@ -463,8 +454,8 @@ class _MenuScreenState extends State<MenuScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF2A2A2A),
-        title: const Text('ማረጋገጫ',
-            style: TextStyle(color: Colors.amber)),
+        title:
+            const Text('ማረጋገጫ', style: TextStyle(color: Colors.amber)),
         content: Text('${item['name']} ይሰረዝ?',
             style: const TextStyle(color: Colors.white)),
         actions: [
@@ -472,8 +463,7 @@ class _MenuScreenState extends State<MenuScreen> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('አይ')),
           ElevatedButton(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('አዎ'),
           ),
@@ -496,8 +486,8 @@ class _MenuScreenState extends State<MenuScreen> {
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: Colors.amber,
         icon: const Icon(Icons.add, color: Colors.black),
-        label: const Text('አዲስ ጨምር',
-            style: TextStyle(color: Colors.black)),
+        label:
+            const Text('አዲስ ጨምር', style: TextStyle(color: Colors.black)),
         onPressed: () => _showForm(),
       ),
       body: loading
@@ -512,8 +502,7 @@ class _MenuScreenState extends State<MenuScreen> {
                       horizontal: 12, vertical: 4),
                   child: ListTile(
                     title: Text(item['name'] as String,
-                        style:
-                            const TextStyle(color: Colors.white)),
+                        style: const TextStyle(color: Colors.white)),
                     subtitle: Text(
                       '${item['category']}  •  ${(item['price'] as num).toStringAsFixed(0)} ብር',
                       style: const TextStyle(color: Colors.white54),
@@ -522,8 +511,7 @@ class _MenuScreenState extends State<MenuScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.edit,
-                              color: Colors.amber),
+                          icon: const Icon(Icons.edit, color: Colors.amber),
                           onPressed: () => _showForm(existing: item),
                         ),
                         IconButton(
@@ -639,18 +627,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       final r = summary[i];
                       return ListTile(
                         title: Text(r['item_name'] as String,
+                            style:
+                                const TextStyle(color: Colors.white)),
+                        subtitle: Text(r['category'] as String? ?? '',
                             style: const TextStyle(
-                                color: Colors.white)),
-                        subtitle: Text(
-                            r['category'] as String? ?? '',
-                            style: const TextStyle(
-                                color: Colors.white38,
-                                fontSize: 12)),
+                                color: Colors.white38, fontSize: 12)),
                         trailing: Column(
-                          mainAxisAlignment:
-                              MainAxisAlignment.center,
-                          crossAxisAlignment:
-                              CrossAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Text('${r['total_qty']} ዕቃ',
                                 style: const TextStyle(
