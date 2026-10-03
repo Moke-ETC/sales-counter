@@ -29,33 +29,19 @@ jobs:
           flutter create --project-name sales_counter --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Patch Android build files
+      - name: Patch Gradle and Kotlin
         run: |
-          # Gradle version
+          # 1. Gradle wrapper version
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
 
-          # Force Kotlin 1.9.10 everywhere
-          sed -i 's/\(id "org.jetbrains.kotlin.android" version "\)[^"]*"/\11.9.10"/' android/settings.gradle || true
-          sed -i 's/\(id "org.jetbrains.kotlin.android"\) version "[^"]*"//' android/settings.gradle || true
+          # 2. Kotlin version in settings.gradle (safe patch)
+          sed -i 's/version "[0-9.]*"/version "1.9.10"/' android/settings.gradle
 
-          # Kotlin version var in build.gradle
-          sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.10"/' android/build.gradle || true
-
-          # Append to gradle.properties
+          # 3. Add useAndroidX + force Kotlin stdlib via gradle.properties
           echo "" >> android/gradle.properties
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
           echo "kotlin.jvm.target.validation.mode=warning" >> android/gradle.properties
-
-          # Force Kotlin stdlib version in app/build.gradle
-          echo "" >> android/app/build.gradle
-          echo "configurations.all {" >> android/app/build.gradle
-          echo "    resolutionStrategy {" >> android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.10'" >> android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.10'" >> android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10'" >> android/app/build.gradle
-          echo "    }" >> android/app/build.gradle
-          echo "}" >> android/app/build.gradle
 
       - name: Get dependencies
         run: flutter pub get
