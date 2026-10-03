@@ -29,9 +29,13 @@ jobs:
           flutter create --project-name sales_counter --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Patch Gradle
+      - name: Patch Gradle and Kotlin
         run: |
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+          sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.10"/' android/build.gradle
+          echo 'android.useAndroidX=true' >> android/gradle.properties
+          echo 'android.enableJetifier=true' >> android/gradle.properties
+          echo 'kotlin.jvm.target.validation.mode=warning' >> android/gradle.properties
 
       - name: Get dependencies
         run: flutter pub get
