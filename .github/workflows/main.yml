@@ -29,25 +29,12 @@ jobs:
           flutter create --project-name sales_counter --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Patch Gradle and Kotlin
+      - name: Patch Gradle
         run: |
-          # 1. Gradle wrapper version
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-
-          # 2. Kotlin version in settings.gradle (safe patch)
-          sed -i 's/version "[0-9.]*"/version "1.9.10"/' android/settings.gradle
-
-          # 3. Add useAndroidX + force Kotlin stdlib via gradle.properties
-          echo "" >> android/gradle.properties
-          echo "android.useAndroidX=true" >> android/gradle.properties
-          echo "android.enableJetifier=true" >> android/gradle.properties
-          echo "kotlin.jvm.target.validation.mode=warning" >> android/gradle.properties
 
       - name: Get dependencies
         run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
 
       - name: Build APK
         run: flutter build apk --release --no-tree-shake-icons
