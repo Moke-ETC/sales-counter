@@ -932,4 +932,156 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     style: const TextStyle(
                         fontSize: 18, color: Colors.white)),
                 Text('ጠቅላላ ገቢ: ${grandTotal.toStringAsFixed(0)} ብር',
-                    style
+                    style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.amber)),
+              ],
+            ),
+          ),
+          // Waiter breakdown
+          if (waiterSummary.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: const Color(0xFF1F1F1F),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('በአስተናጋጅ:',
+                      style: TextStyle(
+                          color: Colors.amber,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  ...waiterSummary.map((w) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          mainAxisAlignment:
+                              MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('👤 ${w['waiter']}',
+                                style: const TextStyle(
+                                    color: Colors.white)),
+                            Text(
+                              '${w['total_qty']} ዕቃ — ${(w['total_revenue'] as num).toStringAsFixed(0)} ብር',
+                              style: const TextStyle(
+                                  color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      )),
+                ],
+              ),
+            ),
+          Expanded(
+            child: summary.isEmpty
+                ? const Center(
+                    child: Text('ምንም ሽያጭ የለም',
+                        style: TextStyle(color: Colors.white70)))
+                : ListView.builder(
+                    itemCount: summary.length,
+                    itemBuilder: (ctx, i) {
+                      final r = summary[i];
+                      return ListTile(
+                        title: Text(r['item_name'] as String,
+                            style:
+                                const TextStyle(color: Colors.white)),
+                        subtitle: Text(r['category'] as String? ?? '',
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 12)),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('${r['total_qty']} ዕቃ',
+                                style: const TextStyle(
+                                    color: Colors.white70)),
+                            Text(
+                              '${(r['total_revenue'] as num).toStringAsFixed(0)} ብር',
+                              style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== RECEIPT (PDF) ====================
+class Receipt {
+  static Future<void> print(
+      String waiter, List<Map<String, dynamic>> items, double total) async {
+    final doc = pw.Document();
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.roll57,
+        margin: const pw.EdgeInsets.all(6),
+        build: (ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Center(
+              child: pw.Text('ETHIOPIAN FOOD',
+                  style: pw.TextStyle(
+                      fontSize: 14, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Divider(),
+            pw.Text('ቀን: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
+                style: const pw.TextStyle(fontSize: 9)),
+            pw.Text('አስተናጋጅ: $waiter',
+                style: const pw.TextStyle(fontSize: 9)),
+            pw.Divider(),
+            ...items.map((it) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(vertical: 1),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Expanded(
+                        child: pw.Text(
+                          '${it['name']} x${it['qty']}',
+                          style: const pw.TextStyle(fontSize: 9),
+                        ),
+                      ),
+                      pw.Text(
+                        '${(it['total'] as num).toStringAsFixed(0)}',
+                        style: const pw.TextStyle(fontSize: 9),
+                      ),
+                    ],
+                  ),
+                )),
+            pw.Divider(),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('ጠቅላላ',
+                    style: pw.TextStyle(
+                        fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${total.toStringAsFixed(0)} ብር',
+                    style: pw.TextStyle(
+                        fontSize: 11, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.SizedBox(height: 6),
+            pw.Center(
+              child: pw.Text('አመሰግናለሁ!',
+                  style: const pw.TextStyle(fontSize: 10)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (format) => doc.save(),
+      name: 'receipt_${DateTime.now().millisecondsSinceEpoch}',
+    );
+  }
+}
