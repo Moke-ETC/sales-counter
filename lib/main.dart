@@ -932,4 +932,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     itemBuilder: (ctx, i) {
                       final r = summary[i];
                       return ListTile(
-                        title: Text(r['item_name']
+                        title: Text(r['item_name'] as String,
+                            style:
+                                const TextStyle(color: Colors.white)),
+                        subtitle: Text(r['category'] as String? ?? '',
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 12)),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('${r['total_qty']} ዕቃ',
+                                style: const TextStyle(
+                                    color: Colors.white70)),
+                            Text(
+                              '${(r['total_revenue'] as num).toStringAsFixed(0)} ብር',
+                              style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
