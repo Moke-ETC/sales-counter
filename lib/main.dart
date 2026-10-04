@@ -143,7 +143,6 @@ class DB {
     await batch.commit(noResult: true);
   }
 
-  // All transactions, newest first
   static Future<List<Map<String, dynamic>>> getAllSales() async {
     final db = await database;
     return db.query('sales', orderBy: 'timestamp DESC');
@@ -238,8 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _confirm() async {
-    final cartRows =
-        cart.where((c) => c.qty > 0).toList();
+    final cartRows = cart.where((c) => c.qty > 0).toList();
     final rows = cartRows.map((c) => {
           'item_id': c.id,
           'item_name': c.name,
@@ -253,7 +251,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     await DB.saveSales(rows);
 
-    // Build receipt data before resetting cart
     final saleTotal = total;
     final saleItems = cartRows
         .map((c) => {
@@ -279,7 +276,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    // Ask to print receipt
     _askPrintReceipt(waiterName, saleItems, saleTotal);
   }
 
@@ -357,7 +353,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Waiter selector
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             color: const Color(0xFF1F1F1F),
@@ -381,8 +376,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       isExpanded: true,
                       dropdownColor: const Color(0xFF2A2A2A),
                       underline: const SizedBox(),
-                      icon:
-                          const Icon(Icons.arrow_drop_down, color: Colors.amber),
+                      icon: const Icon(Icons.arrow_drop_down,
+                          color: Colors.amber),
                       style: const TextStyle(
                           color: Colors.white, fontSize: 16),
                       items: waiters
@@ -719,7 +714,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return;
       }
 
-      // Build CSV
       final rows = <List<dynamic>>[
         [
           'ID',
@@ -755,11 +749,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
       final file = File('${dir.path}/$fileName');
       await file.writeAsString(csvData);
 
-      // Share
       await Share.shareXFiles(
         [XFile(file.path, mimeType: 'text/csv')],
         subject: 'Sales Export',
-        text: 'የሽያጭ ሪፖርት — ${DateFormat('MMM d, y').format(DateTime.now())}',
+        text:
+            'የሽያጭ ሪፖርት — ${DateFormat('MMM d, y').format(DateTime.now())}',
       );
 
       if (!mounted) return;
@@ -809,6 +803,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   itemBuilder: (ctx, i) {
                     final s = sales[i];
                     final ts = DateTime.parse(s['timestamp'] as String);
+                    final waiterStr = (s['waiter'] as String?) ?? '';
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -817,8 +812,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         leading: CircleAvatar(
                           backgroundColor: Colors.amber.shade900,
                           child: Text(
-                            (s['waiter'] as String)
-                                .substring(0, 1),
+                            waiterStr.isEmpty
+                                ? '?'
+                                : waiterStr.substring(0, 1),
                             style: const TextStyle(
                                 color: Colors.black,
                                 fontWeight: FontWeight.bold),
@@ -939,7 +935,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
           ),
-          // Waiter breakdown
           if (waiterSummary.isNotEmpty)
             Container(
               width: double.infinity,
@@ -954,7 +949,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   ...waiterSummary.map((w) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 2),
                         child: Row(
                           mainAxisAlignment:
                               MainAxisAlignment.spaceBetween,
@@ -1034,7 +1030,8 @@ class Receipt {
             ),
             pw.SizedBox(height: 4),
             pw.Divider(),
-            pw.Text('ቀን: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
+            pw.Text(
+                'ቀን: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
                 style: const pw.TextStyle(fontSize: 9)),
             pw.Text('አስተናጋጅ: $waiter',
                 style: const pw.TextStyle(fontSize: 9)),
@@ -1042,7 +1039,8 @@ class Receipt {
             ...items.map((it) => pw.Padding(
                   padding: const pw.EdgeInsets.symmetric(vertical: 1),
                   child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment:
+                        pw.MainAxisAlignment.spaceBetween,
                     children: [
                       pw.Expanded(
                         child: pw.Text(
