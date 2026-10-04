@@ -4,15 +4,17 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   runApp(const SalesApp());
 }
+
+const List<String> waiters = ['የሮሳ', 'ከድር', 'አህመድ', 'ይቻላል'];
 
 // ==================== APP ====================
 class SalesApp extends StatelessWidget {
@@ -30,79 +32,7 @@ class SalesApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF1A1A1A),
         useMaterial3: true,
       ),
-      home: const SplashScreen(),
-    );
-  }
-}
-
-// ==================== SPLASH SCREEN ====================
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _boot();
-  }
-
-  Future<void> _boot() async {
-    await DB.database;
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 260,
-              height: 260,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.amber, width: 4),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.amber.withOpacity(0.4),
-                    blurRadius: 30,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-              child: ClipOval(
-                child: Image.asset('assets/logo.png', fit: BoxFit.cover),
-              ),
-            ),
-            const SizedBox(height: 30),
-            const Text(
-              'ETHIOPIAN FOOD',
-              style: TextStyle(
-                color: Colors.amber,
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 3,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text('የሽያጭ መቆጣጠሪያ',
-                style: TextStyle(color: Colors.white70, fontSize: 16)),
-            const SizedBox(height: 40),
-            const CircularProgressIndicator(color: Colors.amber),
-          ],
-        ),
-      ),
+      home: const HomeScreen(),
     );
   }
 }
@@ -114,7 +44,8 @@ class DB {
   static Future<Database> get database async {
     if (_db != null) return _db!;
     final dbPath = p.join(await getDatabasesPath(), 'ethiopian_sales.db');
-    _db = await openDatabase(dbPath, version: 1, onCreate: _create);
+    _db = await openDatabase(dbPath, version: 2, onCreate: _create,
+        onUpgrade: _upgrade);
     return _db!;
   }
 
@@ -136,6 +67,7 @@ class DB {
         quantity INTEGER NOT NULL,
         unit_price REAL NOT NULL,
         total_price REAL NOT NULL,
+        waiter TEXT NOT NULL,
         timestamp TEXT NOT NULL
       )
     ''');
@@ -174,6 +106,13 @@ class DB {
     }
   }
 
+  static Future _upgrade(Database db, int oldV, int newV) async {
+    if (oldV < 2) {
+      await db.execute(
+          'ALTER TABLE sales ADD COLUMN waiter TEXT NOT NULL DEFAULT ""');
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getMenu() async {
     final db = await database;
     return db.query('menu_items', orderBy: 'category, id');
@@ -204,6 +143,12 @@ class DB {
     await batch.commit(noResult: true);
   }
 
+  // All transactions, newest first
+  static Future<List<Map<String, dynamic>>> getAllSales() async {
+    final db = await database;
+    return db.query('sales', orderBy: 'timestamp DESC');
+  }
+
   static Future<List<Map<String, dynamic>>> getSummary(
       DateTime from, DateTime to) async {
     final db = await database;
@@ -218,13 +163,18 @@ class DB {
     ''', [from.toIso8601String(), to.toIso8601String()]);
   }
 
-  static Future<List<Map<String, dynamic>>> getAllSales(
+  static Future<List<Map<String, dynamic>>> getWaiterSummary(
       DateTime from, DateTime to) async {
     final db = await database;
-    return db.query('sales',
-        where: 'timestamp BETWEEN ? AND ?',
-        whereArgs: [from.toIso8601String(), to.toIso8601String()],
-        orderBy: 'timestamp DESC');
+    return db.rawQuery('''
+      SELECT waiter,
+             SUM(quantity) as total_qty,
+             SUM(total_price) as total_revenue
+      FROM sales
+      WHERE timestamp BETWEEN ? AND ?
+      GROUP BY waiter
+      ORDER BY total_revenue DESC
+    ''', [from.toIso8601String(), to.toIso8601String()]);
   }
 }
 
@@ -254,6 +204,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<CartItem> cart = [];
   bool loading = true;
+  String selectedWaiter = waiters.first;
 
   @override
   void initState() {
@@ -287,22 +238,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _confirm() async {
-    final sold = cart.where((c) => c.qty > 0).toList();
-    if (sold.isEmpty) return;
-
-    final rows = sold
-        .map((c) => {
-              'item_id': c.id,
-              'item_name': c.name,
-              'category': c.category,
-              'quantity': c.qty,
-              'unit_price': c.price,
-              'total_price': c.price * c.qty,
-            })
-        .toList();
+    final cartRows =
+        cart.where((c) => c.qty > 0).toList();
+    final rows = cartRows.map((c) => {
+          'item_id': c.id,
+          'item_name': c.name,
+          'category': c.category,
+          'quantity': c.qty,
+          'unit_price': c.price,
+          'total_price': c.price * c.qty,
+          'waiter': selectedWaiter,
+        }).toList();
+    if (rows.isEmpty) return;
 
     await DB.saveSales(rows);
-    final totalAmount = sold.fold<double>(0, (s, c) => s + c.price * c.qty);
+
+    // Build receipt data before resetting cart
+    final saleTotal = total;
+    final saleItems = cartRows
+        .map((c) => {
+              'name': c.name,
+              'qty': c.qty,
+              'price': c.price,
+              'total': c.price * c.qty,
+            })
+        .toList();
+    final waiterName = selectedWaiter;
 
     setState(() {
       for (var c in cart) c.qty = 0;
@@ -310,43 +271,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!mounted) return;
 
-    // Show options: Print Receipt or Skip
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('ሽያጭ ተመዝግቧል ✅'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    // Ask to print receipt
+    _askPrintReceipt(waiterName, saleItems, saleTotal);
+  }
+
+  void _askPrintReceipt(
+      String waiter, List<Map<String, dynamic>> items, double total) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF2A2A2A),
-        title: const Text('ሽያጭ ተመዝግቧል ✅',
-            style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ...sold.map((c) => Text(
-                  '${c.name}  ×  ${c.qty}  =  ${(c.price * c.qty).toStringAsFixed(0)} ብር',
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                )),
-            const Divider(color: Colors.white24),
-            Text(
-              'ጠቅላላ: ${totalAmount.toStringAsFixed(0)} ብር',
-              style: const TextStyle(
-                  color: Colors.amber,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
+        title: const Text('ደረሰኝ?',
+            style: TextStyle(color: Colors.amber)),
+        content: Text(
+            'የ$waiter ሽያጭ በ$total ብር\nደረሰኝ ያትሙ?',
+            style: const TextStyle(color: Colors.white)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('ዝጋ'),
+            child: const Text('አይ'),
           ),
           ElevatedButton.icon(
-            icon: const Icon(Icons.print, size: 18),
-            label: const Text('ደረሰኝ'),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            icon: const Icon(Icons.print, color: Colors.black),
+            label: const Text('አትም',
+                style: TextStyle(color: Colors.black)),
             onPressed: () {
               Navigator.pop(ctx);
-              _printReceipt(sold, totalAmount);
+              Receipt.print(waiter, items, total);
             },
           ),
         ],
@@ -354,78 +315,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _printReceipt(List<CartItem> sold, double totalAmount) async {
-    final doc = pw.Document();
-    final now = DateTime.now();
-    final dateStr = DateFormat('yyyy-MM-dd HH:mm').format(now);
-
-    doc.addPage(pw.Page(
-      pageFormat: PdfPageFormat.roll80,
-      build: (ctx) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.center,
-        children: [
-          pw.SizedBox(height: 10),
-          pw.Text('ETHIOPIAN FOOD',
-              style: pw.TextStyle(
-                  fontSize: 18, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 4),
-          pw.Text('የኢትዮጵያ ምግብ ቤት',
-              style: const pw.TextStyle(fontSize: 12)),
-          pw.SizedBox(height: 4),
-          pw.Text(dateStr,
-              style: const pw.TextStyle(fontSize: 10)),
-          pw.Divider(),
-          pw.SizedBox(height: 6),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text('Item', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              pw.Text('Qty x Price', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              pw.Text('Total', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-            ],
-          ),
-          pw.Divider(),
-          ...sold.map((c) => pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Expanded(child: pw.Text(c.name, style: const pw.TextStyle(fontSize: 10))),
-                    pw.Text('${c.qty} x ${c.price.toStringAsFixed(0)}', style: const pw.TextStyle(fontSize: 10)),
-                    pw.Text('${(c.price * c.qty).toStringAsFixed(0)}', style: const pw.TextStyle(fontSize: 10)),
-                  ],
-                ),
-              )),
-          pw.Divider(),
-          pw.SizedBox(height: 6),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text('TOTAL', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-              pw.Text('${totalAmount.toStringAsFixed(0)} ብር',
-                  style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-            ],
-          ),
-          pw.SizedBox(height: 20),
-          pw.Text('እናመሰግናለን!',
-              style: const pw.TextStyle(fontSize: 12)),
-          pw.Text('Thank you!',
-              style: const pw.TextStyle(fontSize: 10)),
-          pw.SizedBox(height: 20),
-        ],
-      ),
-    ));
-
-    await Printing.layoutPdf(
-      onLayout: (format) => doc.save(),
-      name: 'receipt_${now.millisecondsSinceEpoch}',
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -434,76 +329,140 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('የሽያጭ መቆጣጠሪያ'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'ታሪክ',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HistoryScreen()),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.restaurant_menu),
             onPressed: () async {
-              await Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const MenuScreen()));
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MenuScreen()),
+              );
               _load();
             },
           ),
           IconButton(
             icon: const Icon(Icons.bar_chart),
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const ReportsScreen())),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ReportsScreen()),
+            ),
           ),
         ],
       ),
-      body: ListView(
-        children: grouped.entries.expand((entry) {
-          return [
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: Colors.amber.shade900.withOpacity(0.3),
-              child: Text(
-                entry.key,
-                style: const TextStyle(
-                    color: Colors.amber,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold),
-              ),
-            ),
-            ...entry.value.map((item) => Card(
-                  color: const Color(0xFF2A2A2A),
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  child: ListTile(
-                    title: Text(item.name,
-                        style: const TextStyle(
-                            fontSize: 16, color: Colors.white)),
-                    subtitle: Text('${item.price.toStringAsFixed(0)} ብር',
-                        style: const TextStyle(color: Colors.amber)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.remove_circle,
-                              color: Colors.redAccent, size: 32),
-                          onPressed: () => setState(() {
-                            if (item.qty > 0) item.qty--;
-                          }),
-                        ),
-                        SizedBox(
-                          width: 40,
-                          child: Text('${item.qty}',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white)),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add_circle,
-                              color: Colors.greenAccent, size: 32),
-                          onPressed: () => setState(() => item.qty++),
-                        ),
-                      ],
+      body: Column(
+        children: [
+          // Waiter selector
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: const Color(0xFF1F1F1F),
+            child: Row(
+              children: [
+                const Icon(Icons.person, color: Colors.amber, size: 20),
+                const SizedBox(width: 8),
+                const Text('አስተናጋጅ:',
+                    style: TextStyle(color: Colors.white70)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2A2A2A),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber, width: 1),
+                    ),
+                    child: DropdownButton<String>(
+                      value: selectedWaiter,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF2A2A2A),
+                      underline: const SizedBox(),
+                      icon:
+                          const Icon(Icons.arrow_drop_down, color: Colors.amber),
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 16),
+                      items: waiters
+                          .map((w) => DropdownMenuItem(
+                                value: w,
+                                child: Text(w),
+                              ))
+                          .toList(),
+                      onChanged: (v) =>
+                          setState(() => selectedWaiter = v!),
                     ),
                   ),
-                )),
-          ];
-        }).toList(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              children: grouped.entries.expand((entry) {
+                return [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    color: Colors.amber.shade900.withOpacity(0.3),
+                    child: Text(
+                      entry.key,
+                      style: const TextStyle(
+                        color: Colors.amber,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  ...entry.value.map((item) => Card(
+                        color: const Color(0xFF2A2A2A),
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
+                        child: ListTile(
+                          title: Text(item.name,
+                              style: const TextStyle(
+                                  fontSize: 16, color: Colors.white)),
+                          subtitle: Text(
+                              '${item.price.toStringAsFixed(0)} ብር',
+                              style:
+                                  const TextStyle(color: Colors.amber)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle,
+                                    color: Colors.redAccent, size: 32),
+                                onPressed: () => setState(() {
+                                  if (item.qty > 0) item.qty--;
+                                }),
+                              ),
+                              SizedBox(
+                                width: 40,
+                                child: Text('${item.qty}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white)),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.add_circle,
+                                    color: Colors.greenAccent, size: 32),
+                                onPressed: () =>
+                                    setState(() => item.qty++),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )),
+                ];
+              }).toList(),
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: Container(
         padding: const EdgeInsets.all(16),
@@ -516,7 +475,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text('ዕቃዎች: $totalItems',
-                      style: const TextStyle(color: Colors.white70)),
+                      style:
+                          const TextStyle(color: Colors.white70)),
                   Text('ጠቅላላ: ${total.toStringAsFixed(0)} ብር',
                       style: const TextStyle(
                           fontSize: 22,
@@ -529,8 +489,8 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.check),
               label: const Text('አረጋግጥ'),
               style: ElevatedButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24, vertical: 14),
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
               ),
@@ -572,7 +532,8 @@ class _MenuScreenState extends State<MenuScreen> {
         text: existing != null
             ? (existing['price'] as num).toStringAsFixed(0)
             : '');
-    final catCtrl = TextEditingController(text: existing?['category'] ?? '');
+    final catCtrl =
+        TextEditingController(text: existing?['category'] ?? '');
 
     showDialog(
       context: context,
@@ -611,7 +572,9 @@ class _MenuScreenState extends State<MenuScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('ሰርዝ')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('ሰርዝ'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
             onPressed: () async {
@@ -675,7 +638,8 @@ class _MenuScreenState extends State<MenuScreen> {
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: Colors.amber,
         icon: const Icon(Icons.add, color: Colors.black),
-        label: const Text('አዲስ ጨምር', style: TextStyle(color: Colors.black)),
+        label:
+            const Text('አዲስ ጨምር', style: TextStyle(color: Colors.black)),
         onPressed: () => _showForm(),
       ),
       body: loading
@@ -686,8 +650,8 @@ class _MenuScreenState extends State<MenuScreen> {
                 final item = items[i];
                 return Card(
                   color: const Color(0xFF2A2A2A),
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  margin: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 4),
                   child: ListTile(
                     title: Text(item['name'] as String,
                         style: const TextStyle(color: Colors.white)),
@@ -699,12 +663,13 @@ class _MenuScreenState extends State<MenuScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.amber),
+                          icon:
+                              const Icon(Icons.edit, color: Colors.amber),
                           onPressed: () => _showForm(existing: item),
                         ),
                         IconButton(
-                          icon:
-                              const Icon(Icons.delete, color: Colors.redAccent),
+                          icon: const Icon(Icons.delete,
+                              color: Colors.redAccent),
                           onPressed: () => _delete(item),
                         ),
                       ],
@@ -713,6 +678,173 @@ class _MenuScreenState extends State<MenuScreen> {
                 );
               },
             ),
+    );
+  }
+}
+
+// ==================== HISTORY SCREEN ====================
+class HistoryScreen extends StatefulWidget {
+  const HistoryScreen({super.key});
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  List<Map<String, dynamic>> sales = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => loading = true);
+    sales = await DB.getAllSales();
+    setState(() => loading = false);
+  }
+
+  Future<void> _exportCsv() async {
+    try {
+      final allSales = await DB.getAllSales();
+      if (allSales.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ምንም ሽያጭ የለም'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Build CSV
+      final rows = <List<dynamic>>[
+        [
+          'ID',
+          'Date',
+          'Time',
+          'Waiter',
+          'Category',
+          'Item',
+          'Qty',
+          'Unit Price',
+          'Total',
+        ]
+      ];
+      for (var s in allSales) {
+        final ts = DateTime.parse(s['timestamp'] as String);
+        rows.add([
+          s['id'],
+          DateFormat('yyyy-MM-dd').format(ts),
+          DateFormat('HH:mm:ss').format(ts),
+          s['waiter'],
+          s['category'],
+          s['item_name'],
+          s['quantity'],
+          s['unit_price'],
+          s['total_price'],
+        ]);
+      }
+
+      final csvData = const ListToCsvConverter().convert(rows);
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName =
+          'sales_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsString(csvData);
+
+      // Share
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/csv')],
+        subject: 'Sales Export',
+        text: 'የሽያጭ ሪፖርት — ${DateFormat('MMM d, y').format(DateTime.now())}',
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('CSV ተዘጋጅቷል: $fileName'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('ስህተት: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.amber.shade900,
+        title: const Text('የትራንዛክሽን ታሪክ'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _load,
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'CSV አውጣ',
+            onPressed: _exportCsv,
+          ),
+        ],
+      ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : sales.isEmpty
+              ? const Center(
+                  child: Text('ምንም ታሪክ የለም',
+                      style: TextStyle(color: Colors.white70)))
+              : ListView.builder(
+                  itemCount: sales.length,
+                  itemBuilder: (ctx, i) {
+                    final s = sales[i];
+                    final ts = DateTime.parse(s['timestamp'] as String);
+                    return Card(
+                      color: const Color(0xFF2A2A2A),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.amber.shade900,
+                          child: Text(
+                            (s['waiter'] as String)
+                                .substring(0, 1),
+                            style: const TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        title: Text(
+                          '${s['item_name']} × ${s['quantity']}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        subtitle: Text(
+                          '${s['waiter']} • ${DateFormat('MMM d, HH:mm').format(ts)}\n${s['category']}',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12),
+                        ),
+                        isThreeLine: true,
+                        trailing: Text(
+                          '${(s['total_price'] as num).toStringAsFixed(0)} ብር',
+                          style: const TextStyle(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16),
+                        ),
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }
@@ -726,6 +858,7 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> summary = [];
+  List<Map<String, dynamic>> waiterSummary = [];
   double grandTotal = 0;
   int grandQty = 0;
   DateTime from = DateTime.now();
@@ -739,6 +872,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _load() async {
     final rows = await DB.getSummary(from, to);
+    final waitersData = await DB.getWaiterSummary(from, to);
     double t = 0;
     int q = 0;
     for (var r in rows) {
@@ -747,6 +881,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
     setState(() {
       summary = rows;
+      waiterSummary = waitersData;
       grandTotal = t;
       grandQty = q;
     });
@@ -767,49 +902,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
-  Future<void> _exportCSV() async {
-    final rows = await DB.getAllSales(from, to);
-    if (rows.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('ምንም ሽያጭ የለም'),
-            backgroundColor: Colors.orange),
-      );
-      return;
-    }
-
-    final csvData = <List<dynamic>>[
-      ['Date', 'Time', 'Item', 'Category', 'Qty', 'Unit Price', 'Total'],
-    ];
-    for (var r in rows) {
-      final ts = DateTime.parse(r['timestamp'] as String);
-      csvData.add([
-        DateFormat('yyyy-MM-dd').format(ts),
-        DateFormat('HH:mm').format(ts),
-        r['item_name'],
-        r['category'],
-        r['quantity'],
-        r['unit_price'],
-        r['total_price'],
-      ]);
-    }
-    csvData.add([]);
-    csvData.add(['', '', '', 'GRAND TOTAL', grandQty, '', grandTotal]);
-
-    final csvString = const ListToCsvConverter().convert(csvData);
-
-    final dir = await getApplicationDocumentsDirectory();
-    final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final file = File('${dir.path}/sales_$timestamp.csv');
-    await file.writeAsString(csvString);
-
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'text/csv')],
-      subject: 'Sales Export $timestamp',
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -820,11 +912,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
           IconButton(
             icon: const Icon(Icons.date_range),
             onPressed: _pickRange,
-          ),
-          IconButton(
-            icon: const Icon(Icons.download),
-            tooltip: 'CSV አውጣ',
-            onPressed: _exportCSV,
           ),
         ],
       ),
@@ -842,65 +929,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text('የተሸጡ ዕቃዎች: $grandQty',
-                    style:
-                        const TextStyle(fontSize: 18, color: Colors.white)),
-                Text('ጠቅላላ ገቢ: ${grandTotal.toStringAsFixed(0)} ብር',
                     style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.amber)),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.download),
-              label: const Text('CSV አውጣ (Excel)'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 48),
-              ),
-              onPressed: _exportCSV,
-            ),
-          ),
-          Expanded(
-            child: summary.isEmpty
-                ? const Center(
-                    child: Text('ምንም ሽያጭ የለም',
-                        style: TextStyle(color: Colors.white70)))
-                : ListView.builder(
-                    itemCount: summary.length,
-                    itemBuilder: (ctx, i) {
-                      final r = summary[i];
-                      return ListTile(
-                        title: Text(r['item_name'] as String,
-                            style: const TextStyle(color: Colors.white)),
-                        subtitle: Text(r['category'] as String? ?? '',
-                            style: const TextStyle(
-                                color: Colors.white38, fontSize: 12)),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('${r['total_qty']} ዕቃ',
-                                style: const TextStyle(
-                                    color: Colors.white70)),
-                            Text(
-                              '${(r['total_revenue'] as num).toStringAsFixed(0)} ብር',
-                              style: const TextStyle(
-                                  color: Colors.amber,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+                        fontSize: 18, color: Colors.white)),
+                Text('ጠቅላላ ገቢ: ${grandTotal.toStringAsFixed(0)} ብር',
+                    style
