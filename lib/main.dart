@@ -11,6 +11,23 @@ void main() {
 
 const List<String> waiters = ['የሮሳ', 'ከድር', 'አህመድ', 'ይቻላል'];
 
+// Items that count as "እንጀራ" — edit this list to match your menu names
+const List<String> enjeraKeywords = [
+  'አንጀራ',
+  'በያይነት',
+  'ፍርፍር',
+];
+
+// Items that count as "ዳቦ"
+const List<String> breadKeywords = [
+  'ዳቦ',
+];
+
+// Water items to sum
+const List<String> water1LKeywords = ['1 ሊትር ውሃ'];
+const List<String> water2LKeywords = ['2 ሊትር ውሃ'];
+const List<String> water05LKeywords = ['0.5', 'ግማሽ ሊትር'];
+
 // ==================== APP ====================
 class SalesApp extends StatelessWidget {
   const SalesApp({super.key});
@@ -40,7 +57,7 @@ class DB {
     if (_db != null) return _db!;
     final dbPath = p.join(await getDatabasesPath(), 'ethiopian_sales.db');
     _db = await openDatabase(dbPath,
-        version: 2, onCreate: _create, onUpgrade: _upgrade);
+        version: 3, onCreate: _create, onUpgrade: _upgrade);
     return _db!;
   }
 
@@ -63,6 +80,7 @@ class DB {
         unit_price REAL NOT NULL,
         total_price REAL NOT NULL,
         waiter TEXT NOT NULL,
+        discount REAL NOT NULL DEFAULT 0,
         timestamp TEXT NOT NULL
       )
     ''');
@@ -94,6 +112,7 @@ class DB {
       {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ'},
       {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች'},
       {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች'},
+      {'name': '0.5 ሊትር ውሃ', 'price': 25.0, 'category': 'መጠጦች'},
       {'name': 'ለስላሳ መጠጦች', 'price': 50.0, 'category': 'መጠጦች'},
     ];
     for (var item in menu) {
@@ -105,6 +124,20 @@ class DB {
     if (oldV < 2) {
       await db.execute(
           'ALTER TABLE sales ADD COLUMN waiter TEXT NOT NULL DEFAULT ""');
+    }
+    if (oldV < 3) {
+      await db.execute(
+          'ALTER TABLE sales ADD COLUMN discount REAL NOT NULL DEFAULT 0');
+      // Add 0.5L water if missing
+      final existing = await db.query('menu_items',
+          where: 'name = ?', whereArgs: ['0.5 ሊትር ውሃ']);
+      if (existing.isEmpty) {
+        await db.insert('menu_items', {
+          'name': '0.5 ሊትር ውሃ',
+          'price': 25.0,
+          'category': 'መጠጦች',
+        });
+      }
     }
   }
 
@@ -199,11 +232,18 @@ class _HomeScreenState extends State<HomeScreen> {
   List<CartItem> cart = [];
   bool loading = true;
   String selectedWaiter = waiters.first;
+  final discountCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    discountCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -220,8 +260,41 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => loading = false);
   }
 
-  double get total => cart.fold(0.0, (s, c) => s + c.price * c.qty);
+  double get subtotal => cart.fold(0.0, (s, c) => s + c.price * c.qty);
   int get totalItems => cart.fold(0, (s, c) => s + c.qty);
+  double get discount => double.tryParse(discountCtrl.text.trim()) ?? 0;
+  double get total {
+    final t = subtotal - discount;
+    return t < 0 ? 0 : t;
+  }
+
+  // ---- Top summary counts ----
+  bool _nameMatches(String name, List<String> keywords) {
+    for (var k in keywords) {
+      if (name.contains(k)) return true;
+    }
+    return false;
+  }
+
+  int get enjeraCount => cart
+      .where((c) => c.category != 'መጠጦች' && _nameMatches(c.name, enjeraKeywords))
+      .fold(0, (s, c) => s + c.qty);
+
+  int get breadCount => cart
+      .where((c) => _nameMatches(c.name, breadKeywords))
+      .fold(0, (s, c) => s + c.qty);
+
+  int get water1L => cart
+      .where((c) => c.name == '1 ሊትር ውሃ')
+      .fold(0, (s, c) => s + c.qty);
+
+  int get water2L => cart
+      .where((c) => c.name == '2 ሊትር ውሃ')
+      .fold(0, (s, c) => s + c.qty);
+
+  int get water05L => cart
+      .where((c) => c.name.contains('0.5'))
+      .fold(0, (s, c) => s + c.qty);
 
   Map<String, List<CartItem>> get grouped {
     final map = <String, List<CartItem>>{};
@@ -233,6 +306,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _confirm() async {
     final cartRows = cart.where((c) => c.qty > 0).toList();
+    if (cartRows.isEmpty) return;
+
+    final discPerRow = discount / cartRows.length;
     final rows = cartRows
         .map((c) => {
               'item_id': c.id,
@@ -242,13 +318,14 @@ class _HomeScreenState extends State<HomeScreen> {
               'unit_price': c.price,
               'total_price': c.price * c.qty,
               'waiter': selectedWaiter,
+              'discount': discPerRow,
             })
         .toList();
-    if (rows.isEmpty) return;
 
     await DB.saveSales(rows);
     setState(() {
       for (var c in cart) c.qty = 0;
+      discountCtrl.clear();
     });
 
     if (!mounted) return;
@@ -303,8 +380,48 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          // ---- Top Summary Bar ----
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            color: const Color(0xFF0F0F0F),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 6,
+              children: [
+                _summaryChip(
+                  icon: Icons.local_dining,
+                  label: 'እንጀራ',
+                  value: '$enjeraCount',
+                ),
+                _summaryChip(
+                  icon: Icons.bakery_dining,
+                  label: 'ዳቦ',
+                  value: '$breadCount',
+                ),
+                _summaryChip(
+                  icon: Icons.local_drink,
+                  label: '2L ውሃ',
+                  value: '$water2L',
+                ),
+                _summaryChip(
+                  icon: Icons.local_drink,
+                  label: '1L ውሃ',
+                  value: '$water1L',
+                ),
+                _summaryChip(
+                  icon: Icons.local_drink,
+                  label: '0.5L ውሃ',
+                  value: '$water05L',
+                ),
+              ],
+            ),
+          ),
+          // ---- Waiter selector ----
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 8),
             color: const Color(0xFF1F1F1F),
             child: Row(
               children: [
@@ -315,7 +432,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
                       color: const Color(0xFF2A2A2A),
                       borderRadius: BorderRadius.circular(8),
@@ -341,6 +459,52 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+          // ---- Discount row ----
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 8),
+            color: const Color(0xFF1A1A1A),
+            child: Row(
+              children: [
+                const Icon(Icons.percent,
+                    color: Colors.orangeAccent, size: 20),
+                const SizedBox(width: 8),
+                const Text('ቅናሽ:',
+                    style: TextStyle(color: Colors.white70)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: discountCtrl,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white),
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: '0',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      filled: true,
+                      fillColor: const Color(0xFF2A2A2A),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                            color: Colors.orangeAccent),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                            color: Colors.orangeAccent),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text('ብር',
+                    style: TextStyle(color: Colors.white70)),
               ],
             ),
           ),
@@ -419,9 +583,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('ዕቃዎች: $totalItems',
-                      style:
-                          const TextStyle(color: Colors.white70)),
+                  Text(
+                      'ዕቃዎች: $totalItems • ድምር: ${subtotal.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12)),
+                  if (discount > 0)
+                    Text(
+                        'ቅናሽ: -${discount.toStringAsFixed(0)} ብር',
+                        style: const TextStyle(
+                            color: Colors.orangeAccent,
+                            fontSize: 12)),
                   Text('ጠቅላላ: ${total.toStringAsFixed(0)} ብር',
                       style: const TextStyle(
                           fontSize: 22,
@@ -443,6 +614,36 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _summaryChip({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A2A2A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.amber.shade700, width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.amber, size: 16),
+          const SizedBox(width: 6),
+          Text('$label: ',
+              style: const TextStyle(
+                  color: Colors.white70, fontSize: 13)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.amber,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14)),
+        ],
       ),
     );
   }
@@ -675,6 +876,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           'Qty',
           'Unit Price',
           'Total',
+          'Discount',
         ]
       ];
       for (var s in allSales) {
@@ -689,6 +891,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           s['quantity'],
           s['unit_price'],
           s['total_price'],
+          s['discount'] ?? 0,
         ]);
       }
 
@@ -696,7 +899,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
       final fileName =
           'sales_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
 
-      // Try Downloads folder first; fallback to app files
       File file;
       final downloadsDir = Directory('/storage/emulated/0/Download');
       if (await downloadsDir.exists()) {
