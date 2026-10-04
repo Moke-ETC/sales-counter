@@ -29,9 +29,10 @@ jobs:
           flutter create --project-name sales_counter --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Patch Gradle
+      - name: Patch Gradle and Kotlin
         run: |
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+          sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.24"/' android/build.gradle
 
       - name: Get dependencies
         run: flutter pub get
