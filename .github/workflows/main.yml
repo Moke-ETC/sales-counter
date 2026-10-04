@@ -29,10 +29,37 @@ jobs:
           flutter create --project-name sales_counter --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Patch Gradle and Kotlin
+      - name: Patch Kotlin, Gradle, and AGP
         run: |
+          # Force newer Gradle
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
+
+          # Force Kotlin 1.9.24 in root build.gradle
           sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.24"/' android/build.gradle
+
+          # Force AGP and Kotlin plugin in settings.gradle
+          sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.1.2"/' android/settings.gradle
+          sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.24"/' android/settings.gradle
+
+          # Add a resolution strategy to force Kotlin stdlib to 1.9.24
+          cat >> android/build.gradle << 'EOF'
+
+          subprojects {
+              configurations.all {
+                  resolutionStrategy {
+                      force "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+                      force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.24"
+                      force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24"
+                  }
+              }
+          }
+          EOF
+
+          # Show final files for debug
+          echo "===== settings.gradle ====="
+          cat android/settings.gradle
+          echo "===== build.gradle ====="
+          cat android/build.gradle
 
       - name: Get dependencies
         run: flutter pub get
