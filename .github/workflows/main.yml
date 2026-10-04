@@ -22,20 +22,11 @@ jobs:
         with:
           flutter-version: '3.22.3'
           channel: 'stable'
-          # NO cache: true → fresh every time
 
       - name: Generate Android project
         run: |
           flutter create --project-name sales_counter --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
-
-      - name: Clear all caches
-        run: |
-          rm -rf ~/.gradle/caches
-          rm -rf ~/.gradle/wrapper
-          rm -rf android/.gradle
-          rm -rf android/app/.gradle
-          flutter clean
 
       - name: Get dependencies
         run: flutter pub get
