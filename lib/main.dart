@@ -4,9 +4,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -44,8 +41,8 @@ class DB {
   static Future<Database> get database async {
     if (_db != null) return _db!;
     final dbPath = p.join(await getDatabasesPath(), 'ethiopian_sales.db');
-    _db = await openDatabase(dbPath, version: 2, onCreate: _create,
-        onUpgrade: _upgrade);
+    _db = await openDatabase(dbPath,
+        version: 2, onCreate: _create, onUpgrade: _upgrade);
     return _db!;
   }
 
@@ -238,75 +235,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _confirm() async {
     final cartRows = cart.where((c) => c.qty > 0).toList();
-    final rows = cartRows.map((c) => {
-          'item_id': c.id,
-          'item_name': c.name,
-          'category': c.category,
-          'quantity': c.qty,
-          'unit_price': c.price,
-          'total_price': c.price * c.qty,
-          'waiter': selectedWaiter,
-        }).toList();
+    final rows = cartRows
+        .map((c) => {
+              'item_id': c.id,
+              'item_name': c.name,
+              'category': c.category,
+              'quantity': c.qty,
+              'unit_price': c.price,
+              'total_price': c.price * c.qty,
+              'waiter': selectedWaiter,
+            })
+        .toList();
     if (rows.isEmpty) return;
 
     await DB.saveSales(rows);
-
-    final saleTotal = total;
-    final saleItems = cartRows
-        .map((c) => {
-              'name': c.name,
-              'qty': c.qty,
-              'price': c.price,
-              'total': c.price * c.qty,
-            })
-        .toList();
-    final waiterName = selectedWaiter;
-
     setState(() {
       for (var c in cart) c.qty = 0;
     });
 
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('ሽያጭ ተመዝግቧል ✅'),
+      SnackBar(
+        content: Text('ሽያጭ ተመዝግቧል ✅ (${selectedWaiter})'),
         backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
-
-    _askPrintReceipt(waiterName, saleItems, saleTotal);
-  }
-
-  void _askPrintReceipt(
-      String waiter, List<Map<String, dynamic>> items, double total) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF2A2A2A),
-        title: const Text('ደረሰኝ?',
-            style: TextStyle(color: Colors.amber)),
-        content: Text(
-            'የ$waiter ሽያጭ በ$total ብር\nደረሰኝ ያትሙ?',
-            style: const TextStyle(color: Colors.white)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('አይ'),
-          ),
-          ElevatedButton.icon(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: Colors.amber),
-            icon: const Icon(Icons.print, color: Colors.black),
-            label: const Text('አትም',
-                style: TextStyle(color: Colors.black)),
-            onPressed: () {
-              Navigator.pop(ctx);
-              Receipt.print(waiter, items, total);
-            },
-          ),
-        ],
+        duration: const Duration(seconds: 2),
       ),
     );
   }
@@ -1006,80 +958,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ==================== RECEIPT (PDF) ====================
-class Receipt {
-  static Future<void> print(
-      String waiter, List<Map<String, dynamic>> items, double total) async {
-    final doc = pw.Document();
-
-    doc.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.roll57,
-        margin: const pw.EdgeInsets.all(6),
-        build: (ctx) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Center(
-              child: pw.Text('ETHIOPIAN FOOD',
-                  style: pw.TextStyle(
-                      fontSize: 14, fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.SizedBox(height: 4),
-            pw.Divider(),
-            pw.Text(
-                'ቀን: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
-                style: const pw.TextStyle(fontSize: 9)),
-            pw.Text('አስተናጋጅ: $waiter',
-                style: const pw.TextStyle(fontSize: 9)),
-            pw.Divider(),
-            ...items.map((it) => pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(vertical: 1),
-                  child: pw.Row(
-                    mainAxisAlignment:
-                        pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Expanded(
-                        child: pw.Text(
-                          '${it['name']} x${it['qty']}',
-                          style: const pw.TextStyle(fontSize: 9),
-                        ),
-                      ),
-                      pw.Text(
-                        '${(it['total'] as num).toStringAsFixed(0)}',
-                        style: const pw.TextStyle(fontSize: 9),
-                      ),
-                    ],
-                  ),
-                )),
-            pw.Divider(),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text('ጠቅላላ',
-                    style: pw.TextStyle(
-                        fontSize: 11, fontWeight: pw.FontWeight.bold)),
-                pw.Text('${total.toStringAsFixed(0)} ብር',
-                    style: pw.TextStyle(
-                        fontSize: 11, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-            pw.SizedBox(height: 6),
-            pw.Center(
-              child: pw.Text('አመሰግናለሁ!',
-                  style: const pw.TextStyle(fontSize: 10)),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    await Printing.layoutPdf(
-      onLayout: (format) => doc.save(),
-      name: 'receipt_${DateTime.now().millisecondsSinceEpoch}',
     );
   }
 }
