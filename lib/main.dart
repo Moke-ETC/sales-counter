@@ -713,11 +713,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       final file = File('${dir.path}/$fileName');
       await file.writeAsString(csvData);
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/csv')],
+       await Share.shareXFiles(
+        [XFile(file.path)],
         subject: 'Sales Export',
-        text:
-            'የሽያጭ ሪፖርት — ${DateFormat('MMM d, y').format(DateTime.now())}',
       );
 
       if (!mounted) return;
