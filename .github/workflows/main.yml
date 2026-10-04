@@ -31,17 +31,11 @@ jobs:
 
       - name: Patch Kotlin, Gradle, and AGP
         run: |
-          # Force newer Gradle
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-
-          # Force Kotlin 1.9.24 in root build.gradle
           sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.24"/' android/build.gradle
-
-          # Force AGP and Kotlin plugin in settings.gradle
           sed -i 's/id "com.android.application" version ".*"/id "com.android.application" version "8.1.2"/' android/settings.gradle
           sed -i 's/id "org.jetbrains.kotlin.android" version ".*"/id "org.jetbrains.kotlin.android" version "1.9.24"/' android/settings.gradle
 
-          # Add a resolution strategy to force Kotlin stdlib to 1.9.24
           cat >> android/build.gradle << 'EOF'
 
           subprojects {
@@ -52,14 +46,36 @@ jobs:
                       force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24"
                   }
               }
+              afterEvaluate { project ->
+                  if (project.hasProperty('android')) {
+                      project.android {
+                          compileOptions {
+                              sourceCompatibility JavaVersion.VERSION_17
+                              targetCompatibility JavaVersion.VERSION_17
+                          }
+                      }
+                  }
+                  project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                      kotlinOptions {
+                          jvmTarget = "17"
+                      }
+                  }
+              }
           }
           EOF
 
-          # Show final files for debug
-          echo "===== settings.gradle ====="
-          cat android/settings.gradle
-          echo "===== build.gradle ====="
-          cat android/build.gradle
+          cat >> android/app/build.gradle << 'EOF'
+
+          android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
 
       - name: Get dependencies
         run: flutter pub get
