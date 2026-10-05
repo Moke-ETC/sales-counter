@@ -22,6 +22,12 @@ const Map<String, String> ownerInfo = {
   'phone': '0904180455',
 };
 
+const List<Map<String, dynamic>> paymentMethods = [
+  {'key': 'cash', 'label': 'ጥሬ ገንዘብ', 'icon': Icons.payments, 'color': Colors.green},
+  {'key': 'cbe', 'label': 'CBE', 'icon': Icons.account_balance, 'color': Colors.purple},
+  {'key': 'telebirr', 'label': 'ቴሌብር', 'icon': Icons.phone_android, 'color': Colors.lightBlue},
+];
+
 // ==================== APP ====================
 class SalesApp extends StatelessWidget {
   const SalesApp({super.key});
@@ -51,7 +57,7 @@ class DB {
     if (_db != null) return _db!;
     final dbPath = p.join(await getDatabasesPath(), 'meri_shiro.db');
     _db = await openDatabase(dbPath,
-        version: 5, onCreate: _create, onUpgrade: _upgrade);
+        version: 6, onCreate: _create, onUpgrade: _upgrade);
     return _db!;
   }
 
@@ -79,16 +85,12 @@ class DB {
         served_with TEXT NOT NULL DEFAULT '',
         is_credit INTEGER NOT NULL DEFAULT 0,
         is_paid INTEGER NOT NULL DEFAULT 1,
+        payment_method TEXT NOT NULL DEFAULT 'cash',
         timestamp TEXT NOT NULL
       )
     ''');
 
-    // 'served_with' values:
-    //   'እንጀራ'  = counts as enjera
-    //   'ዳቦ'     = counts as bread
-    //   ''       = neither (drinks, extras)
     final menu = [
-      // ቁርስ (Breakfast)
       {'name': 'የርማል ፉል', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'ስፔሻል ፉል', 'price': 140.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንጀራ ፍርፍር', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
@@ -96,8 +98,6 @@ class DB {
       {'name': 'አንቁላል ፍርፍር', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
       {'name': 'አንቁላል ስልስ', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንቁላል በስጋ', 'price': 250.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-
-      // ምሳ (Lunch)
       {'name': 'በያይነት', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ፓስታ በስጋ', 'price': 110.0, 'category': 'ምሳ', 'served_with': ''},
       {'name': 'ፓስታ ባትካልት', 'price': 130.0, 'category': 'ምሳ', 'served_with': ''},
@@ -106,8 +106,6 @@ class DB {
       {'name': 'ሽሮ ፋስክ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ቲማቲም ለብለብ', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ተጋቢኖ', 'price': 150.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-
-      // የፍስክ ምግብ (Fasting)
       {'name': 'ስፔሻል', 'price': 230.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ጥብስ', 'price': 350.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ዱለት', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
@@ -115,12 +113,8 @@ class DB {
       {'name': 'ሽሮ ባይባይ', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ሽሮ በቅቤ', 'price': 150.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ቅቅል', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-
-      // ተጨማሪ (Extras)
       {'name': 'ጎመን አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
       {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
-
-      // መጠጦች (Drinks)
       {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
       {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
       {'name': '0.5 ሊትር ውሃ', 'price': 25.0, 'category': 'መጠጦች', 'served_with': ''},
@@ -136,47 +130,35 @@ class DB {
       await db.execute(
           'ALTER TABLE sales ADD COLUMN waiter TEXT NOT NULL DEFAULT ""');
     }
-    if (oldV < 3) {
-      // discount column no longer used, skip
-    }
     if (oldV < 4) {
-      await db.execute(
-          'ALTER TABLE sales ADD COLUMN customer TEXT NOT NULL DEFAULT ""');
-      await db.execute(
-          'ALTER TABLE sales ADD COLUMN is_credit INTEGER NOT NULL DEFAULT 0');
-      await db.execute(
-          'ALTER TABLE sales ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 1');
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN customer TEXT NOT NULL DEFAULT ""');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN is_credit INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN is_paid INTEGER NOT NULL DEFAULT 1');
+      } catch (_) {}
     }
     if (oldV < 5) {
-      // Add served_with to both tables
-      await db.execute(
-          'ALTER TABLE sales ADD COLUMN served_with TEXT NOT NULL DEFAULT ""');
-      await db.execute(
-          'ALTER TABLE menu_items ADD COLUMN served_with TEXT NOT NULL DEFAULT ""');
-      // Backfill served_with for existing menu items by name
-      final rows = await db.query('menu_items');
-      for (var r in rows) {
-        final name = r['name'] as String;
-        String sw = '';
-        if (name.contains('ዳቦ') || name.contains('ፉል')) {
-          sw = 'ዳቦ';
-        } else if (name.contains('አንጀራ') ||
-            name.contains('ፍርፍር') ||
-            name.contains('በያይነት') ||
-            name.contains('ሽሮ') ||
-            name.contains('ጎመን') ||
-            name.contains('ቲማቲም') ||
-            name.contains('ተጋቢኖ') ||
-            name.contains('ጥብስ') ||
-            name.contains('ዱለት') ||
-            name.contains('ቅቅል') ||
-            name.contains('ድንች') ||
-            name.contains('ስፔሻል')) {
-          sw = 'እንጀራ';
-        }
-        await db.update('menu_items', {'served_with': sw},
-            where: 'id = ?', whereArgs: [r['id']]);
-      }
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN served_with TEXT NOT NULL DEFAULT ""');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE menu_items ADD COLUMN served_with TEXT NOT NULL DEFAULT ""');
+      } catch (_) {}
+    }
+    if (oldV < 6) {
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL DEFAULT "cash"');
+      } catch (_) {}
     }
   }
 
@@ -209,18 +191,32 @@ class DB {
     await batch.commit(noResult: true);
   }
 
+  // Update a single sale quantity
+  static Future<void> updateSaleQty(int saleId, int qty) async {
+    final db = await database;
+    if (qty <= 0) {
+      await db.delete('sales', where: 'id = ?', whereArgs: [saleId]);
+      return;
+    }
+    final row = await db.query('sales', where: 'id = ?', whereArgs: [saleId]);
+    if (row.isEmpty) return;
+    final unit = (row.first['unit_price'] as num).toDouble();
+    await db.update(
+      'sales',
+      {'quantity': qty, 'total_price': unit * qty},
+      where: 'id = ?',
+      whereArgs: [saleId],
+    );
+  }
+
+  static Future<void> deleteSale(int saleId) async {
+    final db = await database;
+    await db.delete('sales', where: 'id = ?', whereArgs: [saleId]);
+  }
+
   static Future<List<Map<String, dynamic>>> getAllSales() async {
     final db = await database;
     return db.query('sales', orderBy: 'timestamp DESC');
-  }
-
-  static Future<List<Map<String, dynamic>>> getSalesByWaiter(
-      String waiter) async {
-    final db = await database;
-    return db.query('sales',
-        where: 'waiter = ?',
-        whereArgs: [waiter],
-        orderBy: 'timestamp DESC');
   }
 
   static Future<List<Map<String, dynamic>>> getOrdersToday() async {
@@ -314,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String selectedWaiter = waiters.first['name']!;
   final customerCtrl = TextEditingController();
   bool isCredit = false;
+  String paymentMethod = 'cash';
 
   @override
   void initState() {
@@ -345,7 +342,6 @@ class _HomeScreenState extends State<HomeScreen> {
   double get subtotal => cart.fold(0.0, (s, c) => s + c.price * c.qty);
   int get totalItems => cart.fold(0, (s, c) => s + c.qty);
 
-  // Count enjera & bread based on served_with
   int get enjeraCount => cart
       .where((c) => c.servedWith == 'እንጀራ')
       .fold(0, (s, c) => s + c.qty);
@@ -401,6 +397,7 @@ class _HomeScreenState extends State<HomeScreen> {
               'served_with': c.servedWith,
               'is_credit': isCredit ? 1 : 0,
               'is_paid': isCredit ? 0 : 1,
+              'payment_method': isCredit ? 'credit' : paymentMethod,
               'timestamp': timestamp,
             })
         .toList();
@@ -411,15 +408,19 @@ class _HomeScreenState extends State<HomeScreen> {
       for (var c in cart) c.qty = 0;
       customerCtrl.clear();
       isCredit = false;
+      paymentMethod = 'cash';
     });
 
     if (!mounted) return;
+    final payLabel = isCredit
+        ? 'ዱቤ'
+        : paymentMethods
+            .firstWhere((p) => p['key'] == paymentMethod)['label'];
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'ሽያጭ ተመዝግቧል ✅ ($selectedWaiter)'
-          '${customer.isNotEmpty ? " — $customer" : ""}'
-          '${isCredit ? " [ዱቤ]" : ""}',
+          'ሽያጭ ተመዝግቧል ✅ ($selectedWaiter) • $payLabel'
+          '${customer.isNotEmpty ? " — $customer" : ""}',
         ),
         backgroundColor: isCredit ? Colors.orange : Colors.green,
         duration: const Duration(seconds: 2),
@@ -489,7 +490,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Top summary — enjera/bread counted by served_with
+          // Top summary
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -498,21 +499,19 @@ class _HomeScreenState extends State<HomeScreen> {
               spacing: 12,
               runSpacing: 6,
               children: [
-                _chip(Icons.local_dining, 'እንጀራ', enjeraCount,
-                    color: Colors.amber),
-                _chip(Icons.bakery_dining, 'ዳቦ', breadCount,
-                    color: Colors.brown),
+                _chip(Icons.local_dining, 'እንጀራ', enjeraCount, Colors.amber),
+                _chip(Icons.bakery_dining, 'ዳቦ', breadCount, Colors.brown),
                 _chip(Icons.local_drink, '2L ውሃ', water2L,
-                    color: Colors.lightBlueAccent),
+                    Colors.lightBlueAccent),
                 _chip(Icons.local_drink, '1L ውሃ', water1L,
-                    color: Colors.lightBlueAccent),
+                    Colors.lightBlueAccent),
                 _chip(Icons.local_drink, '0.5L ውሃ', water05L,
-                    color: Colors.lightBlueAccent),
+                    Colors.lightBlueAccent),
               ],
             ),
           ),
 
-          // Waiter selector + phone
+          // Waiter
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             color: const Color(0xFF1F1F1F),
@@ -572,7 +571,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // Customer name
+          // Customer
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             color: const Color(0xFF1A1A1A),
@@ -633,6 +632,94 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ],
+            ),
+          ),
+
+          // Payment method
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: const Color(0xFF1A1A1A),
+            child: Opacity(
+              opacity: isCredit ? 0.35 : 1,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(Icons.account_balance_wallet,
+                          color: Colors.teal, size: 20),
+                      SizedBox(width: 8),
+                      Text('የክፍያ ዘዴ:',
+                          style: TextStyle(color: Colors.white70)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: paymentMethods.map((pm) {
+                      final selected = paymentMethod == pm['key'];
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: InkWell(
+                            onTap: isCredit
+                                ? null
+                                : () => setState(
+                                    () => paymentMethod = pm['key'] as String),
+                            child: Container(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? (pm['color'] as Color)
+                                        .withOpacity(0.25)
+                                    : const Color(0xFF2A2A2A),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: selected
+                                      ? pm['color'] as Color
+                                      : Colors.white24,
+                                  width: selected ? 2 : 1,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    pm['icon'] as IconData,
+                                    color: selected
+                                        ? pm['color'] as Color
+                                        : Colors.white60,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    pm['label'] as String,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : Colors.white60,
+                                      fontWeight: selected
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  if (isCredit)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text('ዱቤ ሲሆን የክፍያ ዘዴ አያስፈልግም',
+                          style: TextStyle(
+                              color: Colors.orangeAccent, fontSize: 11)),
+                    ),
+                ],
+              ),
             ),
           ),
 
@@ -762,8 +849,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _chip(IconData icon, String label, int value,
-      {required Color color}) {
+  Widget _chip(IconData icon, String label, int value, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -790,7 +876,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ==================== ORDERS SCREEN ====================
+// ==================== ORDERS SCREEN (EDITABLE) ====================
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
   @override
@@ -814,75 +900,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 
   void _showDetails(String customer) async {
-    final items = await DB.getCustomerItems(customer);
-    if (!mounted) return;
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1A1A1A),
       isScrollControlled: true,
-      builder: (ctx) {
-        double total = 0;
-        for (var it in items) {
-          total += ((it['total_price'] ?? 0) as num).toDouble();
-        }
-        return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          maxChildSize: 0.9,
-          minChildSize: 0.4,
-          expand: false,
-          builder: (ctx2, scrollCtrl) => Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                color: Colors.amber.shade900,
-                child: Row(
-                  children: [
-                    const Icon(Icons.person, color: Colors.black),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(customer,
-                          style: const TextStyle(
-                              color: Colors.black,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold)),
-                    ),
-                    Text('${total.toStringAsFixed(0)} ብር',
-                        style: const TextStyle(
-                            color: Colors.black,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  controller: scrollCtrl,
-                  itemCount: items.length,
-                  itemBuilder: (ctx3, i) {
-                    final it = items[i];
-                    final ts = DateTime.tryParse(it['timestamp'] ?? '');
-                    return ListTile(
-                      title: Text(
-                          '${it['item_name']} × ${it['quantity']}',
-                          style: const TextStyle(color: Colors.white)),
-                      subtitle: Text(
-                        '${it['waiter']} • ${ts != null ? DateFormat('HH:mm').format(ts) : ''}',
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12),
-                      ),
-                      trailing: Text(
-                        '${((it['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
-                        style: const TextStyle(color: Colors.amber),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (ctx) => _CustomerEditorSheet(
+        customer: customer,
+        onChanged: _load,
+      ),
     );
+    // Reload parent list after sheet closes
+    _load();
   }
 
   @override
@@ -938,17 +966,313 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                   ? Colors.orange
                                   : Colors.white60),
                         ),
-                        trailing: Text(
-                          '${(o['total_revenue'] as num).toStringAsFixed(0)} ብር',
-                          style: const TextStyle(
-                              color: Colors.amber,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${(o['total_revenue'] as num).toStringAsFixed(0)} ብር',
+                              style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.edit,
+                                color: Colors.white38, size: 18),
+                          ],
                         ),
                       ),
                     );
                   },
                 ),
+    );
+  }
+}
+
+// ==================== CUSTOMER EDITOR SHEET ====================
+class _CustomerEditorSheet extends StatefulWidget {
+  final String customer;
+  final VoidCallback onChanged;
+  const _CustomerEditorSheet({
+    required this.customer,
+    required this.onChanged,
+  });
+  @override
+  State<_CustomerEditorSheet> createState() => _CustomerEditorSheetState();
+}
+
+class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
+  List<Map<String, dynamic>> items = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => loading = true);
+    items = await DB.getCustomerItems(widget.customer);
+    setState(() => loading = false);
+  }
+
+  Future<void> _changeQty(int saleId, int newQty) async {
+    await DB.updateSaleQty(saleId, newQty);
+    await _load();
+    widget.onChanged();
+  }
+
+  Future<void> _deleteItem(int saleId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: const Text('ማረጋገጫ',
+            style: TextStyle(color: Colors.amber)),
+        content: const Text('ይሰረዝ?',
+            style: TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('አይ')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('አዎ'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await DB.deleteSale(saleId);
+      await _load();
+      widget.onChanged();
+    }
+  }
+
+  Future<void> _addItem() async {
+    final menu = await DB.getMenu();
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (ctx2, scrollCtrl) => Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.amber.shade900,
+              child: const Text('ዕቃ ጨምር',
+                  style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold)),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: menu.length,
+                itemBuilder: (ctx3, i) {
+                  final m = menu[i];
+                  return ListTile(
+                    title: Text(m['name'] as String,
+                        style:
+                            const TextStyle(color: Colors.white)),
+                    subtitle: Text(
+                        '${m['category']} • ${(m['price'] as num).toStringAsFixed(0)} ብር',
+                        style: const TextStyle(color: Colors.white54)),
+                    onTap: () => Navigator.pop(ctx, m),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+
+    // Find an existing sale row for this customer+item
+    final existing = items.firstWhere(
+      (it) => it['item_name'] == picked['name'],
+      orElse: () => {},
+    );
+
+    if (existing.isNotEmpty) {
+      // Increment existing
+      final newQty = (existing['quantity'] as int) + 1;
+      await _changeQty(existing['id'] as int, newQty);
+    } else {
+      // Insert new row for same customer, same timestamp batch
+      final now = DateTime.now().toIso8601String();
+      await DB.saveSales([
+        {
+          'item_id': picked['id'],
+          'item_name': picked['name'],
+          'category': picked['category'],
+          'quantity': 1,
+          'unit_price': picked['price'],
+          'total_price': picked['price'],
+          'waiter': items.isNotEmpty ? items.first['waiter'] : 'OWNER',
+          'customer': widget.customer,
+          'served_with': picked['served_with'] ?? '',
+          'is_credit': items.isNotEmpty ? items.first['is_credit'] : 0,
+          'is_paid': items.isNotEmpty ? items.first['is_paid'] : 1,
+          'payment_method': items.isNotEmpty
+              ? items.first['payment_method']
+              : 'cash',
+          'timestamp': now,
+        }
+      ]);
+      await _load();
+      widget.onChanged();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    double total = 0;
+    int qty = 0;
+    for (var it in items) {
+      total += ((it['total_price'] ?? 0) as num).toDouble();
+      qty += (it['quantity'] ?? 0) as int;
+    }
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      maxChildSize: 0.95,
+      minChildSize: 0.4,
+      expand: false,
+      builder: (ctx2, scrollCtrl) => Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.amber.shade900,
+            child: Row(
+              children: [
+                const Icon(Icons.person, color: Colors.black),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(widget.customer,
+                      style: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('$qty ዕቃ',
+                        style: const TextStyle(
+                            color: Colors.black87, fontSize: 12)),
+                    Text('${total.toStringAsFixed(0)} ብር',
+                        style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (loading)
+            const Expanded(
+                child: Center(child: CircularProgressIndicator()))
+          else if (items.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text('ምንም ዕቃ የለም',
+                    style: TextStyle(color: Colors.white70)),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: items.length,
+                itemBuilder: (ctx3, i) {
+                  final it = items[i];
+                  final ts = DateTime.tryParse(it['timestamp'] ?? '');
+                  return Card(
+                    color: const Color(0xFF2A2A2A),
+                    margin: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    child: ListTile(
+                      title: Text(
+                          '${it['item_name']}',
+                          style: const TextStyle(color: Colors.white)),
+                      subtitle: Text(
+                        '${it['waiter']} • ${ts != null ? DateFormat('HH:mm').format(ts) : ''} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 12),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle,
+                                color: Colors.redAccent, size: 26),
+                            onPressed: () => _changeQty(
+                                it['id'] as int,
+                                (it['quantity'] as int) - 1),
+                          ),
+                          SizedBox(
+                            width: 32,
+                            child: Text('${it['quantity']}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white)),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle,
+                                color: Colors.greenAccent, size: 26),
+                            onPressed: () => _changeQty(
+                                it['id'] as int,
+                                (it['quantity'] as int) + 1),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete,
+                                color: Colors.redAccent, size: 22),
+                            onPressed: () =>
+                                _deleteItem(it['id'] as int),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: const Color(0xFF0F0F0F),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('ዕቃ ጨምር'),
+                    onPressed: _addItem,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1405,7 +1729,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return;
       }
       final rows = <List<dynamic>>[
-        ['ID', 'Date', 'Time', 'Waiter', 'Customer', 'Category', 'Item', 'Served With', 'Qty', 'Unit Price', 'Total', 'Credit', 'Paid']
+        ['ID', 'Date', 'Time', 'Waiter', 'Customer', 'Category', 'Item', 'Served With', 'Qty', 'Unit Price', 'Total', 'Credit', 'Paid', 'Payment']
       ];
       for (var s in allSales) {
         final ts = DateTime.parse(s['timestamp'] as String);
@@ -1423,6 +1747,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           s['total_price'],
           (s['is_credit'] ?? 0) == 1 ? 'YES' : 'NO',
           (s['is_paid'] ?? 1) == 1 ? 'YES' : 'NO',
+          s['payment_method'] ?? 'cash',
         ]);
       }
       final csvData = const ListToCsvConverter().convert(rows);
@@ -1453,6 +1778,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  String _payLabel(String key) {
+    for (var p in paymentMethods) {
+      if (p['key'] == key) return p['label'] as String;
+    }
+    return key;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1480,6 +1812,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     final customer = (s['customer'] as String?) ?? '';
                     final isCredit = (s['is_credit'] ?? 0) == 1;
                     final isPaid = (s['is_paid'] ?? 1) == 1;
+                    final pm = (s['payment_method'] as String?) ?? 'cash';
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -1504,7 +1837,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         ),
                         subtitle: Text(
                           '${s['waiter']}${customer.isNotEmpty ? " → $customer" : ""}\n${DateFormat('MMM d, HH:mm').format(ts)}'
-                          '${isCredit ? " • ዱቤ ${isPaid ? "✓" : "⏳"}" : ""}',
+                          '${isCredit ? " • ዱቤ ${isPaid ? "✓" : "⏳"}" : " • ${_payLabel(pm)}"}',
                           style: TextStyle(
                               color: isCredit && !isPaid
                                   ? Colors.orangeAccent
@@ -1540,6 +1873,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   int grandQty = 0;
   int grandEnjera = 0;
   int grandBread = 0;
+  double cashTotal = 0;
+  double cbeTotal = 0;
+  double telebirrTotal = 0;
+  double creditTotal = 0;
 
   @override
   void initState() {
@@ -1549,16 +1886,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _load() async {
     final rows = await DB.getAllSales();
-    double t = 0;
-    int q = 0;
-    int enj = 0;
-    int brd = 0;
+    double t = 0, cash = 0, cbe = 0, tele = 0, credit = 0;
+    int q = 0, enj = 0, brd = 0;
     for (var r in rows) {
-      t += ((r['total_price'] ?? 0) as num).toDouble();
+      final amt = ((r['total_price'] ?? 0) as num).toDouble();
+      t += amt;
       q += (r['quantity'] ?? 0) as int;
       final sw = (r['served_with'] ?? '') as String;
       if (sw == 'እንጀራ') enj += (r['quantity'] ?? 0) as int;
       if (sw == 'ዳቦ') brd += (r['quantity'] ?? 0) as int;
+      final pm = (r['payment_method'] ?? 'cash') as String;
+      if (pm == 'cbe') {
+        cbe += amt;
+      } else if (pm == 'telebirr') {
+        tele += amt;
+      } else if (pm == 'credit') {
+        credit += amt;
+      } else {
+        cash += amt;
+      }
     }
     setState(() {
       summary = rows;
@@ -1566,6 +1912,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       grandQty = q;
       grandEnjera = enj;
       grandBread = brd;
+      cashTotal = cash;
+      cbeTotal = cbe;
+      telebirrTotal = tele;
+      creditTotal = credit;
     });
   }
 
@@ -1590,7 +1940,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
         ],
       ),
-      body: Column(
+      body: ListView(
         children: [
           Container(
             width: double.infinity,
@@ -1598,8 +1948,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
             color: Colors.amber.shade900.withOpacity(0.3),
             child: Column(
               children: [
-                Text('ጠቅላላ ሽያጭ',
-                    style: const TextStyle(
+                const Text('ጠቅላላ ሽያጭ',
+                    style: TextStyle(
                         color: Colors.white70, fontSize: 16)),
                 Text('${grandTotal.toStringAsFixed(0)} ብር',
                     style: const TextStyle(
@@ -1626,11 +1976,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
           ),
+
+          // Payment breakdown
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: const Color(0xFF1F1F1F),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('በክፍያ ዘዴ:',
+                    style: TextStyle(
+                        color: Colors.amber,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                _payRow(Icons.payments, 'ጥሬ ገንዘብ', cashTotal, Colors.green),
+                _payRow(Icons.account_balance, 'CBE', cbeTotal,
+                    Colors.purple),
+                _payRow(Icons.phone_android, 'ቴሌብር', telebirrTotal,
+                    Colors.lightBlue),
+                _payRow(Icons.credit_card, 'ዱቤ (Credit)', creditTotal,
+                    Colors.orange),
+              ],
+            ),
+          ),
+
           if (byWaiter.isNotEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              color: const Color(0xFF1F1F1F),
+              color: const Color(0xFF1A1A1A),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1640,8 +2014,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   ...byWaiter.entries.map((e) => Padding(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 2),
+                        padding: const EdgeInsets.symmetric(vertical: 2),
                         child: Row(
                           mainAxisAlignment:
                               MainAxisAlignment.spaceBetween,
@@ -1663,48 +2036,52 @@ class _ReportsScreenState extends State<ReportsScreen> {
           const SizedBox(height: 8),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Text('ዝርዝር:',
-                    style: TextStyle(
-                        color: Colors.amber,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16)),
-              ],
-            ),
+            child: Text('ዝርዝር:',
+                style: TextStyle(
+                    color: Colors.amber,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
           ),
+          ...summary.map((s) {
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ListTile(
+              title: Text(
+                  '${s['item_name']} × ${s['quantity']}',
+                  style: const TextStyle(color: Colors.white)),
+              subtitle: Text(
+                '${s['waiter']}${(s['customer'] as String?)?.isNotEmpty == true ? " → ${s['customer']}" : ""}'
+                '${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
+                style: const TextStyle(
+                    color: Colors.white54, fontSize: 12),
+              ),
+              trailing: Text(
+                '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
+                style: const TextStyle(
+                    color: Colors.amber, fontWeight: FontWeight.bold),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _payRow(IconData icon, String label, double amount, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
           Expanded(
-            child: summary.isEmpty
-                ? const Center(
-                    child: Text('ምንም ሽያጭ የለም',
-                        style: TextStyle(color: Colors.white70)))
-                : ListView.builder(
-                    itemCount: summary.length,
-                    itemBuilder: (ctx, i) {
-                      final s = summary[i];
-                      final ts = DateTime.tryParse(
-                          (s['timestamp'] ?? '') as String);
-                      return ListTile(
-                        title: Text(
-                            '${s['item_name']} × ${s['quantity']}',
-                            style:
-                                const TextStyle(color: Colors.white)),
-                        subtitle: Text(
-                          '${s['waiter']}${(s['customer'] as String?)?.isNotEmpty == true ? " → ${s['customer']}" : ""}'
-                          '${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12),
-                        ),
-                        trailing: Text(
-                          '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
-                          style: const TextStyle(
-                              color: Colors.amber,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      );
-                    },
-                  ),
+            child: Text(label,
+                style: const TextStyle(color: Colors.white)),
           ),
+          Text('${amount.toStringAsFixed(0)} ብር',
+              style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16)),
         ],
       ),
     );
