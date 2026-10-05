@@ -191,7 +191,6 @@ class DB {
     await batch.commit(noResult: true);
   }
 
-  // Update a single sale quantity
   static Future<void> updateSaleQty(int saleId, int qty) async {
     final db = await database;
     if (qty <= 0) {
@@ -490,115 +489,224 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Top summary
+          // ============ COMPACT TOP CONTROLS ============
+          // Top summary chips
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             color: const Color(0xFF0F0F0F),
             child: Wrap(
-              spacing: 12,
-              runSpacing: 6,
+              spacing: 8,
+              runSpacing: 4,
               children: [
                 _chip(Icons.local_dining, 'እንጀራ', enjeraCount, Colors.amber),
                 _chip(Icons.bakery_dining, 'ዳቦ', breadCount, Colors.brown),
-                _chip(Icons.local_drink, '2L ውሃ', water2L,
+                _chip(Icons.local_drink, '2L', water2L,
                     Colors.lightBlueAccent),
-                _chip(Icons.local_drink, '1L ውሃ', water1L,
+                _chip(Icons.local_drink, '1L', water1L,
                     Colors.lightBlueAccent),
-                _chip(Icons.local_drink, '0.5L ውሃ', water05L,
+                _chip(Icons.local_drink, '0.5L', water05L,
                     Colors.lightBlueAccent),
               ],
             ),
           ),
 
-          // Waiter
+          // Waiter + Payment in ONE ROW (compact)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             color: const Color(0xFF1F1F1F),
-            child: Column(
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.person, color: Colors.amber, size: 20),
-                    const SizedBox(width: 8),
-                    const Text('አስተናጋጅ:',
-                        style: TextStyle(color: Colors.white70)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2A2A2A),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.amber, width: 1),
-                        ),
+                // Waiter dropdown
+                const Icon(Icons.person, color: Colors.amber, size: 18),
+                const SizedBox(width: 4),
+                Expanded(
+                  flex: 3,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2A2A2A),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.amber, width: 1),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedWaiter,
+                        isExpanded: true,
+                        isDense: true,
+                        dropdownColor: const Color(0xFF2A2A2A),
+                        icon: const Icon(Icons.arrow_drop_down,
+                            color: Colors.amber, size: 18),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 13),
+                        items: waiters
+                            .map((w) => DropdownMenuItem(
+                                  value: w['name'],
+                                  child: Text(w['name']!),
+                                ))
+                            .toList(),
+                        onChanged: (v) =>
+                            setState(() => selectedWaiter = v!),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+
+                // Payment dropdown
+                const Icon(Icons.account_balance_wallet,
+                    color: Colors.teal, size: 18),
+                const SizedBox(width: 4),
+                Expanded(
+                  flex: 3,
+                  child: Opacity(
+                    opacity: isCredit ? 0.35 : 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2A2A2A),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.teal, width: 1),
+                      ),
+                      child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
-                          value: selectedWaiter,
+                          value: paymentMethod,
                           isExpanded: true,
+                          isDense: true,
                           dropdownColor: const Color(0xFF2A2A2A),
-                          underline: const SizedBox(),
                           icon: const Icon(Icons.arrow_drop_down,
-                              color: Colors.amber),
+                              color: Colors.teal, size: 18),
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 16),
-                          items: waiters
-                              .map((w) => DropdownMenuItem(
-                                    value: w['name'],
-                                    child: Text(w['name']!),
+                              color: Colors.white, fontSize: 13),
+                          items: paymentMethods
+                              .map((p) => DropdownMenuItem(
+                                    value: p['key'] as String,
+                                    child: Row(
+                                      children: [
+                                        Icon(p['icon'] as IconData,
+                                            color: p['color'] as Color,
+                                            size: 14),
+                                        const SizedBox(width: 4),
+                                        Text(p['label'] as String),
+                                      ],
+                                    ),
                                   ))
                               .toList(),
-                          onChanged: (v) =>
-                              setState(() => selectedWaiter = v!),
+                          onChanged: isCredit
+                              ? null
+                              : (v) => setState(
+                                  () => paymentMethod = v!),
                         ),
                       ),
                     ),
-                  ],
-                ),
-                if (selectedPhone.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const SizedBox(width: 28),
-                      const Icon(Icons.phone, color: Colors.green, size: 16),
-                      const SizedBox(width: 8),
-                      Text(selectedPhone,
-                          style: const TextStyle(
-                              color: Colors.green, fontSize: 14)),
-                    ],
                   ),
-                ],
+                ),
+
+                // Credit toggle - compact
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () => setState(() => isCredit = !isCredit),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isCredit
+                          ? Colors.orange.withOpacity(0.3)
+                          : const Color(0xFF2A2A2A),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color:
+                            isCredit ? Colors.orange : Colors.white24,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.credit_card,
+                          color: isCredit
+                              ? Colors.orange
+                              : Colors.white60,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'ዱቤ',
+                          style: TextStyle(
+                            color: isCredit
+                                ? Colors.orange
+                                : Colors.white60,
+                            fontSize: 12,
+                            fontWeight: isCredit
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
 
-          // Customer
+          // Phone hint under waiter dropdown (only if phone exists)
+          if (selectedPhone.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 3),
+              color: const Color(0xFF1F1F1F),
+              child: Row(
+                children: [
+                  const SizedBox(width: 4),
+                  const Icon(Icons.phone, color: Colors.green, size: 12),
+                  const SizedBox(width: 6),
+                  Text(selectedPhone,
+                      style: const TextStyle(
+                          color: Colors.green, fontSize: 11)),
+                ],
+              ),
+            ),
+
+          // Customer name row (compact)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             color: const Color(0xFF1A1A1A),
             child: Row(
               children: [
                 const Icon(Icons.person_outline,
-                    color: Colors.lightBlueAccent, size: 20),
+                    color: Colors.lightBlueAccent, size: 18),
                 const SizedBox(width: 8),
-                const Text('ደንበኛ:',
-                    style: TextStyle(color: Colors.white70)),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
-                    controller: customerCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'የደንበኛ ስም (ካልተፈለገ ባዶ)',
-                      hintStyle: const TextStyle(color: Colors.white38),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      filled: true,
-                      fillColor: const Color(0xFF2A2A2A),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                            color: Colors.lightBlueAccent),
+                  child: SizedBox(
+                    height: 36,
+                    child: TextField(
+                      controller: customerCtrl,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText: 'የደንበኛ ስም (ካልተፈለገ ባዶ)',
+                        hintStyle: const TextStyle(
+                            color: Colors.white38, fontSize: 12),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        filled: true,
+                        fillColor: const Color(0xFF2A2A2A),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(
+                              color: Colors.lightBlueAccent),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(
+                              color: Colors.lightBlueAccent,
+                              width: 1),
+                        ),
                       ),
                     ),
                   ),
@@ -607,122 +715,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // Credit toggle
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            color: const Color(0xFF1A1A1A),
-            child: Row(
-              children: [
-                const Icon(Icons.credit_card,
-                    color: Colors.orangeAccent, size: 20),
-                const SizedBox(width: 8),
-                const Text('ዱቤ (Credit):',
-                    style: TextStyle(color: Colors.white70)),
-                const Spacer(),
-                Switch(
-                  value: isCredit,
-                  activeColor: Colors.orangeAccent,
-                  onChanged: (v) => setState(() => isCredit = v),
-                ),
-                Text(
-                  isCredit ? 'ዱቤ' : 'በጥሬ ገንዘብ',
-                  style: TextStyle(
-                    color: isCredit ? Colors.orangeAccent : Colors.green,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Payment method
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: const Color(0xFF1A1A1A),
-            child: Opacity(
-              opacity: isCredit ? 0.35 : 1,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: const [
-                      Icon(Icons.account_balance_wallet,
-                          color: Colors.teal, size: 20),
-                      SizedBox(width: 8),
-                      Text('የክፍያ ዘዴ:',
-                          style: TextStyle(color: Colors.white70)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: paymentMethods.map((pm) {
-                      final selected = paymentMethod == pm['key'];
-                      return Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: InkWell(
-                            onTap: isCredit
-                                ? null
-                                : () => setState(
-                                    () => paymentMethod = pm['key'] as String),
-                            child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? (pm['color'] as Color)
-                                        .withOpacity(0.25)
-                                    : const Color(0xFF2A2A2A),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: selected
-                                      ? pm['color'] as Color
-                                      : Colors.white24,
-                                  width: selected ? 2 : 1,
-                                ),
-                              ),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    pm['icon'] as IconData,
-                                    color: selected
-                                        ? pm['color'] as Color
-                                        : Colors.white60,
-                                    size: 22,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    pm['label'] as String,
-                                    style: TextStyle(
-                                      color: selected
-                                          ? Colors.white
-                                          : Colors.white60,
-                                      fontWeight: selected
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  if (isCredit)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text('ዱቤ ሲሆን የክፍያ ዘዴ አያስፈልግም',
-                          style: TextStyle(
-                              color: Colors.orangeAccent, fontSize: 11)),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
+          // ============ MENU LIST (now has more space) ============
           Expanded(
             child: ListView(
               children: grouped.entries.expand((entry) {
@@ -730,13 +723,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                        horizontal: 16, vertical: 8),
                     color: Colors.amber.shade900.withOpacity(0.3),
                     child: Text(
                       entry.key,
                       style: const TextStyle(
                         color: Colors.amber,
-                        fontSize: 20,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -744,33 +737,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   ...entry.value.map((item) => Card(
                         color: const Color(0xFF2A2A2A),
                         margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
+                            horizontal: 10, vertical: 3),
                         child: ListTile(
+                          dense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 2),
                           title: Text(item.name,
                               style: const TextStyle(
-                                  fontSize: 16, color: Colors.white)),
+                                  fontSize: 15, color: Colors.white)),
                           subtitle: Row(
                             children: [
                               Text('${item.price.toStringAsFixed(0)} ብር',
                                   style: const TextStyle(
-                                      color: Colors.amber)),
+                                      color: Colors.amber,
+                                      fontSize: 13)),
                               if (item.servedWith.isNotEmpty) ...[
-                                const SizedBox(width: 8),
+                                const SizedBox(width: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
+                                      horizontal: 5, vertical: 1),
                                   decoration: BoxDecoration(
                                     color: item.servedWith == 'እንጀራ'
                                         ? Colors.amber.shade900
                                             .withOpacity(0.4)
                                         : Colors.brown.withOpacity(0.4),
-                                    borderRadius: BorderRadius.circular(4),
+                                    borderRadius:
+                                        BorderRadius.circular(3),
                                   ),
                                   child: Text(
                                     'በ${item.servedWith}',
                                     style: const TextStyle(
                                         color: Colors.white70,
-                                        fontSize: 11),
+                                        fontSize: 10),
                                   ),
                                 ),
                               ],
@@ -781,23 +779,23 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.remove_circle,
-                                    color: Colors.redAccent, size: 32),
+                                    color: Colors.redAccent, size: 30),
                                 onPressed: () => setState(() {
                                   if (item.qty > 0) item.qty--;
                                 }),
                               ),
                               SizedBox(
-                                width: 40,
+                                width: 36,
                                 child: Text('${item.qty}',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
-                                        fontSize: 20,
+                                        fontSize: 18,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.white)),
                               ),
                               IconButton(
                                 icon: const Icon(Icons.add_circle,
-                                    color: Colors.greenAccent, size: 32),
+                                    color: Colors.greenAccent, size: 30),
                                 onPressed: () =>
                                     setState(() => item.qty++),
                               ),
@@ -812,7 +810,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         color: const Color(0xFF1F1F1F),
         child: Row(
           children: [
@@ -823,21 +821,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Text('ዕቃዎች: $totalItems',
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 12)),
+                          color: Colors.white70, fontSize: 11)),
                   Text('ጠቅላላ: ${subtotal.toStringAsFixed(0)} ብር',
                       style: const TextStyle(
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: Colors.amber)),
                 ],
               ),
             ),
             ElevatedButton.icon(
-              icon: Icon(isCredit ? Icons.credit_card : Icons.check),
+              icon: Icon(isCredit ? Icons.credit_card : Icons.check,
+                  size: 20),
               label: Text(isCredit ? 'በዱቤ' : 'አረጋግጥ'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 24, vertical: 14),
+                    horizontal: 20, vertical: 12),
                 backgroundColor: isCredit ? Colors.orange : Colors.green,
                 foregroundColor: Colors.white,
               ),
@@ -851,25 +850,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _chip(IconData icon, String label, int value, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: const Color(0xFF2A2A2A),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withOpacity(0.7), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 16),
-          const SizedBox(width: 6),
+          Icon(icon, color: color, size: 14),
+          const SizedBox(width: 4),
           Text('$label: ',
               style: const TextStyle(
-                  color: Colors.white70, fontSize: 13)),
+                  color: Colors.white70, fontSize: 12)),
           Text('$value',
               style: TextStyle(
                   color: color,
                   fontWeight: FontWeight.bold,
-                  fontSize: 14)),
+                  fontSize: 13)),
         ],
       ),
     );
@@ -909,7 +908,6 @@ class _OrdersScreenState extends State<OrdersScreen> {
         onChanged: _load,
       ),
     );
-    // Reload parent list after sheet closes
     _load();
   }
 
@@ -1098,18 +1096,15 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
     );
     if (picked == null) return;
 
-    // Find an existing sale row for this customer+item
     final existing = items.firstWhere(
       (it) => it['item_name'] == picked['name'],
       orElse: () => {},
     );
 
     if (existing.isNotEmpty) {
-      // Increment existing
       final newQty = (existing['quantity'] as int) + 1;
       await _changeQty(existing['id'] as int, newQty);
     } else {
-      // Insert new row for same customer, same timestamp batch
       final now = DateTime.now().toIso8601String();
       await DB.saveSales([
         {
@@ -1976,8 +1971,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
           ),
-
-          // Payment breakdown
           Container(
             padding: const EdgeInsets.all(16),
             color: const Color(0xFF1F1F1F),
@@ -1999,7 +1992,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
           ),
-
           if (byWaiter.isNotEmpty)
             Container(
               width: double.infinity,
