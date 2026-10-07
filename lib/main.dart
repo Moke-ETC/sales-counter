@@ -10,8 +10,44 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  runApp(const SalesApp());
+  try {
+    await Firebase.initializeApp();
+    runApp(const SalesApp());
+  } catch (e, stack) {
+    runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.error, color: Colors.red, size: 60),
+                  const SizedBox(height: 16),
+                  const Text('⚠️ Firebase Error',
+                      style: TextStyle(
+                          color: Colors.amber,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  Text('$e',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 14)),
+                  const SizedBox(height: 20),
+                  Text('$stack',
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 10)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
 }
 
 // ==================== CONFIG ====================
@@ -552,7 +588,6 @@ class DB {
 class Cloud {
   static final _db = FirebaseFirestore.instance;
 
-  /// Push a single sale row to Firestore
   static Future<void> pushSale(Map<String, dynamic> row) async {
     try {
       await _db.collection('sales').add({
@@ -564,7 +599,6 @@ class Cloud {
     }
   }
 
-  /// All sales today (for owner)
   static Stream<List<Map<String, dynamic>>> allSalesTodayStream() {
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -577,7 +611,6 @@ class Cloud {
             .toList());
   }
 
-  /// One waiter's sales today
   static Stream<List<Map<String, dynamic>>> waiterSalesTodayStream(
       String waiter) {
     final now = DateTime.now();
@@ -720,10 +753,8 @@ class _HomeScreenState extends State<HomeScreen> {
             })
         .toList();
 
-    // Save locally
     await DB.saveSales(rows);
 
-    // Push to cloud
     for (var r in rows) {
       Cloud.pushSale(r);
     }
@@ -781,7 +812,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.cloud_done),
-            tooltip: 'የእኔ ሽያጮች',
+            tooltip: 'ሽያጮቼ',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const WaiterHistoryScreen()),
@@ -830,7 +861,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.settings),
-            tooltip: 'አዘጋጅ',
             onPressed: _logout,
           ),
         ],
@@ -1207,7 +1237,6 @@ class OwnerScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.list_alt),
-            tooltip: 'ሁሉም ሽያጮች',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const OwnerHistoryScreen()),
@@ -1422,7 +1451,7 @@ class OwnerScreen extends StatelessWidget {
   }
 }
 
-// ==================== OWNER HISTORY (ALL LIVE) ====================
+// ==================== OWNER HISTORY ====================
 class OwnerHistoryScreen extends StatelessWidget {
   const OwnerHistoryScreen({super.key});
   @override
@@ -1500,7 +1529,7 @@ class OwnerHistoryScreen extends StatelessWidget {
   }
 }
 
-// ==================== WAITER HISTORY (only own, from cloud) ====================
+// ==================== WAITER CLOUD HISTORY ====================
 class WaiterHistoryScreen extends StatefulWidget {
   const WaiterHistoryScreen({super.key});
   @override
@@ -2431,7 +2460,7 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 }
 
-// ==================== HISTORY SCREEN (waiter local) ====================
+// ==================== LOCAL HISTORY SCREEN ====================
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
   @override
