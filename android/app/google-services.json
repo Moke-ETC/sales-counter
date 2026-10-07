@@ -1,1 +1,29 @@
-placeholder
+{
+  "project_info": {
+    "project_number": "450729365791",
+    "project_id": "merishiro-927ee",
+    "storage_bucket": "merishiro-927ee.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:450729365791:android:e848771a35ee48406b202a",
+        "android_client_info": {
+          "package_name": "com.moke.etc.meri_shiro"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCie8MQ4WD6m8Lx3INRs8Dqv2_QlvJrCXk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
