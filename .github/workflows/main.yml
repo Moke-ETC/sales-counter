@@ -25,8 +25,64 @@ jobs:
 
       - name: Generate Android project
         run: |
-          flutter create --project-name sales_counter --org com.moke.etc --platforms android .
+          flutter create --project-name meri_shiro --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
+
+      - name: Verify google-services.json
+        run: |
+          if [ ! -f android/app/google-services.json ]; then
+            echo "❌ google-services.json missing!"
+            exit 1
+          fi
+          echo "✅ google-services.json found"
+
+      - name: Patch Gradle for Firebase
+        run: |
+          # Add google-services plugin to root build.gradle
+          cat > android/build.gradle << 'EOF'
+          buildscript {
+              ext.kotlin_version = '1.9.24'
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.2'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+                  classpath 'com.google.gms:google-services:4.4.0'
+              }
+          }
+
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.buildDir = '../build'
+          subprojects {
+              project.buildDir = "${rootProject.buildDir}/${project.name}"
+          }
+          subprojects {
+              project.evaluationDependsOn(':app')
+          }
+
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          EOF
+
+          # Add google-services plugin to app/build.gradle
+          if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
+            echo 'apply plugin: "com.google.gms.google-services"' >> android/app/build.gradle
+          fi
+
+          # Set app label
+          sed -i 's/android:label="[^"]*"/android:label="ሜሪ ሽሮ"/g' android/app/src/main/AndroidManifest.xml
+
+          # Gradle 8.3
+          sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Get dependencies
         run: flutter pub get
@@ -37,5 +93,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
+          name: meri-shiro-apk
           path: build/app/outputs/flutter-apk/app-release.apk
