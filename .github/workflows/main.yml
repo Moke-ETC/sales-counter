@@ -28,32 +28,21 @@ jobs:
           flutter create --project-name meri_shiro --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Verify google-services.json in repo
+      - name: Copy google-services.json into android/app
         run: |
-          if [ ! -f android/app/google-services.json ]; then
-            echo "❌ google-services.json NOT in repo!"
+          if [ ! -f firebase/google-services.json ]; then
+            echo "❌ firebase/google-services.json missing!"
             exit 1
           fi
-          echo "✅ JSON in repo, size:"
+          cp firebase/google-services.json android/app/google-services.json
+          echo "✅ copied. Size:"
           wc -c android/app/google-services.json
-          echo "First 200 chars:"
-          head -c 200 android/app/google-services.json
-
-      - name: Copy google-services.json AFTER flutter create
-        run: |
-          # flutter create may have wiped the folder — re-copy from git
-          git checkout -- android/app/google-services.json 2>/dev/null || true
-          if [ ! -f android/app/google-services.json ]; then
-            echo "❌ JSON missing after flutter create!"
-            ls android/app/
-            exit 1
-          fi
-          echo "✅ JSON in place after flutter create"
-          wc -c android/app/google-services.json
+          echo "First 150 chars:"
+          head -c 150 android/app/google-services.json
+          echo ""
 
       - name: Patch Gradle for Firebase
         run: |
-          # Root build.gradle — with google-services classpath
           cat > android/build.gradle << 'EOF'
           buildscript {
               ext.kotlin_version = '1.9.24'
@@ -88,18 +77,14 @@ jobs:
           }
           EOF
 
-          # App build.gradle — apply google-services at end
           if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
             echo 'apply plugin: "com.google.gms.google-services"' >> android/app/build.gradle
           fi
 
-          # App label
           sed -i 's/android:label="[^"]*"/android:label="ሜሪ ሽሮ"/g' android/app/src/main/AndroidManifest.xml
-
-          # Gradle version
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
 
-          echo "===== app/build.gradle (tail) ====="
+          echo "===== app/build.gradle tail ====="
           tail -5 android/app/build.gradle
 
       - name: Get dependencies
