@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
@@ -59,7 +60,7 @@ Future<void> main() async {
 }
 
 // ==================== CONFIG ====================
-const List<Map<String, String>> waiters = [
+const List<Map<String, String>> defaultWaiters = [
   {'name': 'የሮሳ', 'phone': '+251912810964'},
   {'name': 'ከድር', 'phone': '+251991590934'},
   {'name': 'አህመድ', 'phone': '+251950511508'},
@@ -70,6 +71,8 @@ const Map<String, String> ownerInfo = {
   'name': 'OWNER',
   'phone': '0904180455',
 };
+
+const String defaultPin = '1234';
 
 const List<Map<String, dynamic>> paymentMethods = [
   {'key': 'cash', 'label': 'ጥሬ ገንዘብ', 'icon': Icons.payments, 'color': Colors.green},
@@ -98,7 +101,7 @@ class SalesApp extends StatelessWidget {
   }
 }
 
-// ==================== SPLASH / ROUTER ====================
+// ==================== SPLASH ====================
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -127,7 +130,7 @@ class _SplashScreenState extends State<SplashScreen> {
     } else if (role == 'owner') {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const OwnerScreen()),
+        MaterialPageRoute(builder: (_) => const PinScreen(next: 'owner')),
       );
     } else {
       Navigator.pushReplacement(
@@ -161,6 +164,139 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
+// ==================== PIN SCREEN ====================
+class PinScreen extends StatefulWidget {
+  final String next; // 'owner'
+  const PinScreen({super.key, required this.next});
+  @override
+  State<PinScreen> createState() => _PinScreenState();
+}
+
+class _PinScreenState extends State<PinScreen> {
+  String input = '';
+
+  Future<void> _check() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString('ownerPin') ?? defaultPin;
+    if (input == stored) {
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const OwnerScreen()),
+      );
+    } else {
+      HapticFeedback.heavyImpact();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ ስህተት ፒን'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      setState(() => input = '');
+    }
+  }
+
+  void _tap(String digit) {
+    if (input.length >= 4) return;
+    setState(() => input += digit);
+    if (input.length == 4) _check();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF1A1A1A),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SizedBox(height: 40),
+            const Icon(Icons.lock, color: Colors.amber, size: 60),
+            const SizedBox(height: 12),
+            const Text('ፒን ያስገቡ',
+                style: TextStyle(
+                    color: Colors.amber,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('የባለቤት ፒን (default: 1234)',
+                style: TextStyle(color: Colors.white54, fontSize: 13)),
+            const SizedBox(height: 30),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(4, (i) {
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: i < input.length ? Colors.amber : Colors.white24,
+                  ),
+                );
+              }),
+            ),
+            const Spacer(),
+            ..._buildKeypad(),
+            const SizedBox(height: 30),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildKeypad() {
+    final rows = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['', '0', '⌫'],
+    ];
+    return rows.map((row) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: row.map((d) {
+            if (d.isEmpty) {
+              return const SizedBox(width: 80, height: 60);
+            }
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: InkWell(
+                onTap: () {
+                  if (d == '⌫') {
+                    if (input.isNotEmpty) {
+                      setState(() => input =
+                          input.substring(0, input.length - 1));
+                    }
+                  } else {
+                    _tap(d);
+                  }
+                },
+                child: Container(
+                  width: 80,
+                  height: 60,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A2A),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(d,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      );
+    }).toList();
+  }
+}
+
 // ==================== SETUP ====================
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
@@ -171,6 +307,39 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   String? role;
   String? waiter;
+  List<Map<String, dynamic>> waiters = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWaiters();
+  }
+
+  Future<void> _loadWaiters() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('waiters')
+          .get();
+      if (snap.docs.isEmpty) {
+        // Seed defaults
+        for (var w in defaultWaiters) {
+          await FirebaseFirestore.instance
+              .collection('waiters')
+              .doc(w['name'])
+              .set(w);
+        }
+        waiters = defaultWaiters.map((w) => Map<String, dynamic>.from(w)).toList();
+      } else {
+        waiters = snap.docs.map((d) => d.data()).toList();
+        waiters.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      }
+    } catch (e) {
+      // Offline — use defaults
+      waiters = defaultWaiters.map((w) => Map<String, dynamic>.from(w)).toList();
+    }
+    setState(() => loading = false);
+  }
 
   Future<void> _save() async {
     if (role == null) return;
@@ -180,16 +349,27 @@ class _SetupScreenState extends State<SetupScreen> {
     await prefs.setString(
         'waiterName', role == 'owner' ? ownerInfo['name']! : waiter!);
     if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-          builder: (_) =>
-              role == 'owner' ? const OwnerScreen() : const HomeScreen()),
-    );
+    if (role == 'owner') {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const PinScreen(next: 'owner')),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (loading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF1A1A1A),
+        body: Center(child: CircularProgressIndicator(color: Colors.amber)),
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFF1A1A1A),
       body: SafeArea(
@@ -198,56 +378,56 @@ class _SetupScreenState extends State<SetupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 20),
-              const Icon(Icons.restaurant, size: 60, color: Colors.amber),
               const SizedBox(height: 10),
+              const Icon(Icons.restaurant, size: 50, color: Colors.amber),
+              const SizedBox(height: 8),
               const Text('ሜሪ ሽሮ',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       color: Colors.amber,
-                      fontSize: 28,
+                      fontSize: 24,
                       fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               const Text('ማዋቀር',
                   textAlign: TextAlign.center,
                   style:
-                      TextStyle(color: Colors.white70, fontSize: 14)),
-              const SizedBox(height: 20),
+                      TextStyle(color: Colors.white70, fontSize: 13)),
+              const SizedBox(height: 16),
               const Text('እርስዎ ማን ነዎት?',
                   style: TextStyle(
                       color: Colors.white,
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               _roleCard('ባለቤት (Owner)', 'ሁሉንም ሽያጮች ይመልከቱ',
                   Icons.admin_panel_settings, role == 'owner',
                   () => setState(() {
                         role = 'owner';
                         waiter = null;
                       })),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               _roleCard('አስተናጋጅ (Waiter)', 'የራስዎን ሽያጭ ብቻ',
                   Icons.person, role == 'waiter',
                   () => setState(() => role = 'waiter')),
               if (role == 'waiter') ...[
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 const Text('ስምዎን ይምረጡ:',
                     style: TextStyle(
                         color: Colors.white,
-                        fontSize: 15,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Expanded(
                   child: ListView(
                     children: waiters
                         .map((w) => Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.only(bottom: 6),
                               child: InkWell(
-                                onTap: () =>
-                                    setState(() => waiter = w['name']),
+                                onTap: () => setState(
+                                    () => waiter = w['name'] as String),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 12),
+                                      horizontal: 12, vertical: 10),
                                   decoration: BoxDecoration(
                                     color: waiter == w['name']
                                         ? Colors.amber.shade900
@@ -273,23 +453,25 @@ class _SetupScreenState extends State<SetupScreen> {
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
                                           children: [
-                                            Text(w['name']!,
+                                            Text(w['name'] as String,
                                                 style: TextStyle(
                                                   color: waiter ==
                                                           w['name']
                                                       ? Colors.black
                                                       : Colors.white,
-                                                  fontSize: 17,
+                                                  fontSize: 16,
                                                   fontWeight:
                                                       FontWeight.w600,
                                                 )),
-                                            Text(w['phone']!,
+                                            Text(
+                                                (w['phone'] ?? '')
+                                                    as String,
                                                 style: TextStyle(
                                                   color: waiter ==
                                                           w['name']
                                                       ? Colors.black54
                                                       : Colors.white54,
-                                                  fontSize: 12,
+                                                  fontSize: 11,
                                                 )),
                                           ],
                                         ),
@@ -304,17 +486,17 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
               ] else
                 const Spacer(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               ElevatedButton.icon(
                 icon: const Icon(Icons.check, color: Colors.black),
                 label: const Text('ቀጥል',
                     style: TextStyle(
                         color: Colors.black,
-                        fontSize: 17,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.amber,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onPressed: (role == 'owner' ||
                         (role == 'waiter' && waiter != null))
@@ -333,7 +515,7 @@ class _SetupScreenState extends State<SetupScreen> {
     return InkWell(
       onTap: tap,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: sel ? Colors.amber.shade900 : const Color(0xFF2A2A2A),
           borderRadius: BorderRadius.circular(12),
@@ -343,8 +525,8 @@ class _SetupScreenState extends State<SetupScreen> {
         child: Row(
           children: [
             Icon(icon,
-                size: 36, color: sel ? Colors.black : Colors.amber),
-            const SizedBox(width: 14),
+                size: 30, color: sel ? Colors.black : Colors.amber),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,20 +534,20 @@ class _SetupScreenState extends State<SetupScreen> {
                   Text(title,
                       style: TextStyle(
                         color: sel ? Colors.black : Colors.white,
-                        fontSize: 17,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
                       )),
                   Text(sub,
                       style: TextStyle(
                         color: sel ? Colors.black87 : Colors.white60,
-                        fontSize: 12,
+                        fontSize: 11,
                       )),
                 ],
               ),
             ),
             if (sel)
               const Icon(Icons.check_circle,
-                  color: Colors.black, size: 26),
+                  color: Colors.black, size: 22),
           ],
         ),
       ),
@@ -381,7 +563,7 @@ class DB {
     if (_db != null) return _db!;
     final dbPath = p.join(await getDatabasesPath(), 'meri_shiro.db');
     _db = await openDatabase(dbPath,
-        version: 6, onCreate: _create, onUpgrade: _upgrade);
+        version: 7, onCreate: _create, onUpgrade: _upgrade);
     return _db!;
   }
 
@@ -410,6 +592,8 @@ class DB {
         is_credit INTEGER NOT NULL DEFAULT 0,
         is_paid INTEGER NOT NULL DEFAULT 1,
         payment_method TEXT NOT NULL DEFAULT 'cash',
+        voided INTEGER NOT NULL DEFAULT 0,
+        firestore_id TEXT NOT NULL DEFAULT '',
         timestamp TEXT NOT NULL
       )
     ''');
@@ -423,26 +607,26 @@ class DB {
       {'name': 'አንቁላል ስልስ', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንቁላል በስጋ', 'price': 250.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
       {'name': 'በያይነት', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-      {'name': 'ፓስታ በስጋ', 'price': 110.0, 'category': 'ምሳ', 'served_with': ''},
+      {'name': 'ፓስታ በስጎ', 'price': 110.0, 'category': 'ምሳ', 'served_with': ''},
       {'name': 'ፓስታ ባትካልት', 'price': 130.0, 'category': 'ምሳ', 'served_with': ''},
-      {'name': 'የርማል ድንች', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-      {'name': 'ጎመን', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ ፋስክ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'ኖርማል ድንች', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'ኖርማል ጎመን', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ ፋስስ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ቲማቲም ለብለብ', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ተጋቢኖ', 'price': 150.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ስፔሻል', 'price': 230.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ጥብስ', 'price': 350.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ዱለት', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ጥብስ', 'price': 380.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ዱለት', 'price': 330.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ድንች በስጋ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ ባይባይ', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ በቅቤ', 'price': 150.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ ባይባይ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ በቅቤ', 'price': 200.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ቅቅል', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ጎመን አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
-      {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
-      {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': '0.5 ሊትር ውሃ', 'price': 25.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': 'ለስላሳ መጠጦች', 'price': 50.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': 'ግማሽ አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
+      {'name': 'ዳቦ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
+      {'name': '2 ሊትር ውሃ', 'price': 70.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': '1 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': '0.5 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': 'ለስላሳ መጠጦች', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
     ];
     for (var item in menu) {
       await db.insert('menu_items', item);
@@ -486,6 +670,16 @@ class DB {
             'ALTER TABLE sales ADD COLUMN payment_method TEXT NOT NULL DEFAULT "cash"');
       } catch (_) {}
     }
+    if (oldV < 7) {
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN voided INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'ALTER TABLE sales ADD COLUMN firestore_id TEXT NOT NULL DEFAULT ""');
+      } catch (_) {}
+    }
   }
 
   static Future<List<Map<String, dynamic>>> getMenu() async {
@@ -508,6 +702,11 @@ class DB {
     await db.delete('menu_items', where: 'id = ?', whereArgs: [id]);
   }
 
+  static Future<int> saveSaleRow(Map<String, dynamic> row) async {
+    final db = await database;
+    return db.insert('sales', row);
+  }
+
   static Future<void> saveSales(List<Map<String, dynamic>> rows) async {
     final db = await database;
     final batch = db.batch();
@@ -515,6 +714,12 @@ class DB {
       batch.insert('sales', r);
     }
     await batch.commit(noResult: true);
+  }
+
+  static Future<void> updateSaleFirestoreId(int id, String fsId) async {
+    final db = await database;
+    await db.update('sales', {'firestore_id': fsId},
+        where: 'id = ?', whereArgs: [id]);
   }
 
   static Future<void> updateSaleQty(int saleId, int qty) async {
@@ -541,7 +746,8 @@ class DB {
 
   static Future<List<Map<String, dynamic>>> getAllSales() async {
     final db = await database;
-    return db.query('sales', orderBy: 'timestamp DESC');
+    return db.query('sales',
+        where: 'voided = 0', orderBy: 'timestamp DESC');
   }
 
   static Future<List<Map<String, dynamic>>> getOrdersToday() async {
@@ -558,7 +764,7 @@ class DB {
              MIN(is_credit) as is_credit,
              MAX(timestamp) as last_time
       FROM sales
-      WHERE customer != ''
+      WHERE customer != '' AND voided = 0
         AND timestamp BETWEEN ? AND ?
       GROUP BY customer
       ORDER BY last_time DESC
@@ -573,7 +779,7 @@ class DB {
     final end = DateTime(now.year, now.month, now.day, 23, 59, 59)
         .toIso8601String();
     return db.query('sales',
-        where: 'customer = ? AND timestamp BETWEEN ? AND ?',
+        where: 'customer = ? AND voided = 0 AND timestamp BETWEEN ? AND ?',
         whereArgs: [customer, start, end],
         orderBy: 'timestamp DESC');
   }
@@ -588,9 +794,8 @@ class DB {
              MAX(timestamp) as last_time,
              waiter
       FROM sales
-      WHERE customer != ''
-        AND is_credit = 1
-        AND is_paid = 0
+      WHERE customer != '' AND voided = 0
+        AND is_credit = 1 AND is_paid = 0
       GROUP BY customer
       ORDER BY last_time DESC
     ''');
@@ -604,41 +809,56 @@ class DB {
   }
 }
 
-// ==================== CLOUD (FIRESTORE) — FIXED ====================
+// ==================== CLOUD ====================
 class Cloud {
   static final _db = FirebaseFirestore.instance;
 
-  static Future<void> pushSale(Map<String, dynamic> row) async {
+  static Future<String?> pushSale(Map<String, dynamic> row) async {
     try {
-      await _db.collection('sales').add({
+      final ref = await _db.collection('sales').add({
         ...row,
         'serverTime': FieldValue.serverTimestamp(),
       });
+      return ref.id;
     } catch (e) {
       debugPrint('Cloud push failed: $e');
+      return null;
     }
   }
 
-  // Get ALL sales — no Firestore filter, filter on device
-  static Stream<List<Map<String, dynamic>>> allSalesTodayStream() {
+  static Future<void> voidSale(String fsId) async {
+    try {
+      await _db.collection('sales').doc(fsId).update({'voided': 1});
+    } catch (e) {
+      debugPrint('Void failed: $e');
+    }
+  }
+
+  static Stream<List<Map<String, dynamic>>> allSalesStream() {
     return _db
         .collection('sales')
         .snapshots()
         .map((snap) => snap.docs
             .map((d) => {...d.data(), 'id': d.id})
+            .where((s) => (s['voided'] ?? 0) != 1)
             .toList());
   }
 
-  // Get ALL sales — filter by waiter on device
-  static Stream<List<Map<String, dynamic>>> waiterSalesTodayStream(
+  static Stream<List<Map<String, dynamic>>> waiterSalesStream(
       String waiter) {
     return _db
         .collection('sales')
         .snapshots()
         .map((snap) => snap.docs
             .map((d) => {...d.data(), 'id': d.id})
-            .where((s) => s['waiter'] == waiter)
+            .where((s) =>
+                s['waiter'] == waiter && (s['voided'] ?? 0) != 1)
             .toList());
+  }
+
+  static Stream<List<Map<String, dynamic>>> waitersStream() {
+    return _db.collection('waiters').snapshots().map((snap) =>
+        snap.docs.map((d) => d.data()).toList());
   }
 }
 
@@ -660,7 +880,7 @@ class CartItem {
   });
 }
 
-// ==================== HOME SCREEN (Waiter) ====================
+// ==================== HOME SCREEN ====================
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -714,10 +934,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int get enjeraCount => cart
       .where((c) => c.servedWith == 'እንጀራ')
       .fold(0, (s, c) => s + c.qty);
-
   int get breadCount =>
       cart.where((c) => c.servedWith == 'ዳቦ').fold(0, (s, c) => s + c.qty);
-
   int get water1L =>
       cart.where((c) => c.name == '1 ሊትር ውሃ').fold(0, (s, c) => s + c.qty);
   int get water2L =>
@@ -751,28 +969,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final timestamp = DateTime.now().toIso8601String();
 
-    final rows = cartRows
-        .map((c) => {
-              'item_id': c.id,
-              'item_name': c.name,
-              'category': c.category,
-              'quantity': c.qty,
-              'unit_price': c.price,
-              'total_price': c.price * c.qty,
-              'waiter': waiterName,
-              'customer': customer,
-              'served_with': c.servedWith,
-              'is_credit': isCredit ? 1 : 0,
-              'is_paid': isCredit ? 0 : 1,
-              'payment_method': isCredit ? 'credit' : paymentMethod,
-              'timestamp': timestamp,
-            })
-        .toList();
-
-    await DB.saveSales(rows);
-
-    for (var r in rows) {
-      Cloud.pushSale(r);
+    for (var c in cartRows) {
+      final row = {
+        'item_id': c.id,
+        'item_name': c.name,
+        'category': c.category,
+        'quantity': c.qty,
+        'unit_price': c.price,
+        'total_price': c.price * c.qty,
+        'waiter': waiterName,
+        'customer': customer,
+        'served_with': c.servedWith,
+        'is_credit': isCredit ? 1 : 0,
+        'is_paid': isCredit ? 0 : 1,
+        'payment_method': isCredit ? 'credit' : paymentMethod,
+        'voided': 0,
+        'timestamp': timestamp,
+      };
+      // Save locally
+      final localId = await DB.saveSaleRow({...row, 'firestore_id': ''});
+      // Push to cloud
+      final fsId = await Cloud.pushSale(row);
+      if (fsId != null) {
+        await DB.updateSaleFirestoreId(localId, fsId);
+      }
     }
 
     setState(() {
@@ -813,13 +1033,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     if (loading) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+          body: Center(child: CircularProgressIndicator()));
     }
-
-    final selectedPhone = waiters
-        .firstWhere((w) => w['name'] == waiterName,
-            orElse: () => {'phone': ''})['phone']!;
 
     return Scaffold(
       appBar: AppBar(
@@ -828,57 +1043,38 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.cloud_done),
-            tooltip: 'ሽያጮቼ',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const WaiterHistoryScreen()),
-            ),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const WaiterHistoryScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.receipt_long),
-            tooltip: 'ዛሬ ትዕዛዞች',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const OrdersScreen()),
-            ),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const OrdersScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.credit_card),
-            tooltip: 'ዱቤ ዝርዝር',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CreditScreen()),
-            ),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CreditScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.history),
-            tooltip: 'ታሪክ',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const HistoryScreen()),
-            ),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const HistoryScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.restaurant_menu),
             onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const MenuScreen()),
-              );
+              await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const MenuScreen()));
               _load();
             },
           ),
           IconButton(
             icon: const Icon(Icons.bar_chart),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ReportsScreen()),
-            ),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ReportsScreen())),
           ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _logout,
-          ),
+          IconButton(icon: const Icon(Icons.settings), onPressed: _logout),
         ],
       ),
       body: Column(
@@ -1019,23 +1215,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-          if (selectedPhone.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-              color: const Color(0xFF1F1F1F),
-              child: Row(
-                children: [
-                  const SizedBox(width: 4),
-                  const Icon(Icons.phone, color: Colors.green, size: 12),
-                  const SizedBox(width: 6),
-                  Text(selectedPhone,
-                      style: const TextStyle(
-                          color: Colors.green, fontSize: 11)),
-                ],
-              ),
-            ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             color: const Color(0xFF1A1A1A),
@@ -1230,18 +1409,111 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ==================== OWNER SCREEN — FIXED (filter on device) ====================
-class OwnerScreen extends StatelessWidget {
+// ==================== OWNER SCREEN ====================
+class OwnerScreen extends StatefulWidget {
   const OwnerScreen({super.key});
+  @override
+  State<OwnerScreen> createState() => _OwnerScreenState();
+}
 
-  Future<void> _logout(BuildContext context) async {
+class _OwnerScreenState extends State<OwnerScreen> {
+  int _lastCount = -1;
+  bool _initialized = false;
+
+  Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    if (!context.mounted) return;
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => const SetupScreen()),
     );
+  }
+
+  void _playAlert() {
+    SystemSound.play(SystemSoundType.alert);
+    HapticFeedback.mediumImpact();
+  }
+
+  Future<void> _exportCsv() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sales')
+          .orderBy('timestamp', descending: true)
+          .get();
+      if (snap.docs.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('ምንም ሽያጭ የለም'),
+              backgroundColor: Colors.orange),
+        );
+        return;
+      }
+      final rows = <List<dynamic>>[
+        [
+          'Date',
+          'Time',
+          'Waiter',
+          'Customer',
+          'Category',
+          'Item',
+          'Served With',
+          'Qty',
+          'Unit Price',
+          'Total',
+          'Credit',
+          'Paid',
+          'Payment',
+          'Voided'
+        ]
+      ];
+      for (var d in snap.docs) {
+        final s = d.data();
+        final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+        rows.add([
+          ts != null ? DateFormat('yyyy-MM-dd').format(ts) : '',
+          ts != null ? DateFormat('HH:mm:ss').format(ts) : '',
+          s['waiter'] ?? '',
+          s['customer'] ?? '',
+          s['category'] ?? '',
+          s['item_name'] ?? '',
+          s['served_with'] ?? '',
+          s['quantity'] ?? 0,
+          s['unit_price'] ?? 0,
+          s['total_price'] ?? 0,
+          (s['is_credit'] ?? 0) == 1 ? 'YES' : 'NO',
+          (s['is_paid'] ?? 1) == 1 ? 'YES' : 'NO',
+          s['payment_method'] ?? 'cash',
+          (s['voided'] ?? 0) == 1 ? 'YES' : 'NO',
+        ]);
+      }
+      final csv = const ListToCsvConverter().convert(rows);
+      final name =
+          'all_sales_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
+      File file;
+      final dl = Directory('/storage/emulated/0/Download');
+      if (await dl.exists()) {
+        file = File('${dl.path}/$name');
+      } else {
+        final appDir = await getDatabasesPath();
+        file = File('$appDir/$name');
+      }
+      await file.writeAsString(csv);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('CSV: ${file.path}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 6)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('ስህተት: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   @override
@@ -1252,40 +1524,37 @@ class OwnerScreen extends StatelessWidget {
         title: const Text('ሜሪ ሽሮ — ባለቤት'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.list_alt),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const OwnerHistoryScreen()),
-            ),
+            icon: const Icon(Icons.picture_as_pdf),
+            tooltip: 'CSV አውጣ',
+            onPressed: _exportCsv,
+          ),
+          IconButton(
+            icon: const Icon(Icons.calendar_month),
+            tooltip: '7 ቀን ሪፖርት',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const WeeklyReportScreen())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.people),
+            tooltip: 'አስተናጋጆች',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const WaitersScreen())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.lock),
+            tooltip: 'ፒን ቀይር',
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ChangePinScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => _logout(context),
+            onPressed: _logout,
           ),
         ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Cloud.allSalesTodayStream(),
+        stream: Cloud.allSalesStream(),
         builder: (ctx, snap) {
-          if (snap.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error,
-                        color: Colors.red, size: 60),
-                    const SizedBox(height: 16),
-                    Text('ስህተት:\n${snap.error}',
-                        textAlign: TextAlign.center,
-                        style:
-                            const TextStyle(color: Colors.white70)),
-                  ],
-                ),
-              ),
-            );
-          }
           if (!snap.hasData) {
             return const Center(
               child: Column(
@@ -1300,14 +1569,30 @@ class OwnerScreen extends StatelessWidget {
             );
           }
 
-          // ⬇ Filter today's sales on device
           final now = DateTime.now();
           final todayStart = DateTime(now.year, now.month, now.day);
-          final allSales = snap.data!;
-          final sales = allSales.where((s) {
+          final all = snap.data!;
+          final sales = all.where((s) {
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
             return ts != null && ts.isAfter(todayStart);
           }).toList();
+
+          // New sale alert
+          if (_initialized && sales.length > _lastCount) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _playAlert();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('🔔 አዲስ ሽያጭ መጥቷል!'),
+                  backgroundColor: Colors.green,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            });
+          }
+          _initialized = true;
+          _lastCount = sales.length;
 
           final byWaiter = <String, Map<String, dynamic>>{};
           double grandTotal = 0;
@@ -1475,51 +1760,246 @@ class OwnerScreen extends StatelessWidget {
   }
 }
 
-// ==================== OWNER HISTORY — FIXED ====================
-class OwnerHistoryScreen extends StatelessWidget {
-  const OwnerHistoryScreen({super.key});
+// ==================== CHANGE PIN SCREEN ====================
+class ChangePinScreen extends StatefulWidget {
+  const ChangePinScreen({super.key});
+  @override
+  State<ChangePinScreen> createState() => _ChangePinScreenState();
+}
+
+class _ChangePinScreenState extends State<ChangePinScreen> {
+  final currentCtrl = TextEditingController();
+  final newCtrl = TextEditingController();
+  final confirmCtrl = TextEditingController();
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString('ownerPin') ?? defaultPin;
+    if (currentCtrl.text != stored) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('❌ የአሁኑ ፒን ስህተት'),
+            backgroundColor: Colors.red),
+      );
+      return;
+    }
+    if (newCtrl.text.length != 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('አዲስ ፒን 4 ቁጥር መሆን አለበት'),
+            backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    if (newCtrl.text != confirmCtrl.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('አዲስ ፒን አይመሳሰልም'),
+            backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    await prefs.setString('ownerPin', newCtrl.text);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('✅ ፒን ተቀይሯል'),
+          backgroundColor: Colors.green),
+    );
+    Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.amber.shade900,
-        title: const Text('ሁሉም ሽያጮች'),
+        title: const Text('ፒን ቀይር'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            TextField(
+              controller: currentCtrl,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              style: const TextStyle(color: Colors.white, fontSize: 24),
+              textAlign: TextAlign.center,
+              decoration: const InputDecoration(
+                  labelText: 'የአሁኑ ፒን',
+                  labelStyle: TextStyle(color: Colors.amber)),
+            ),
+            TextField(
+              controller: newCtrl,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              style: const TextStyle(color: Colors.white, fontSize: 24),
+              textAlign: TextAlign.center,
+              decoration: const InputDecoration(
+                  labelText: 'አዲስ ፒን',
+                  labelStyle: TextStyle(color: Colors.amber)),
+            ),
+            TextField(
+              controller: confirmCtrl,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              style: const TextStyle(color: Colors.white, fontSize: 24),
+              textAlign: TextAlign.center,
+              decoration: const InputDecoration(
+                  labelText: 'አዲስ ፒን ደግመህ',
+                  labelStyle: TextStyle(color: Colors.amber)),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.save),
+              label: const Text('አስቀምጥ'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 30, vertical: 14),
+              ),
+              onPressed: _save,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== WAITERS MANAGEMENT ====================
+class WaitersScreen extends StatefulWidget {
+  const WaitersScreen({super.key});
+  @override
+  State<WaitersScreen> createState() => _WaitersScreenState();
+}
+
+class _WaitersScreenState extends State<WaitersScreen> {
+  void _showForm({String? existingName, String? existingPhone}) {
+    final nameCtrl = TextEditingController(text: existingName ?? '');
+    final phoneCtrl = TextEditingController(text: existingPhone ?? '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: Text(existingName == null ? 'አዲስ አስተናጋጅ' : 'አርትዕ',
+            style: const TextStyle(color: Colors.amber)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                  labelText: 'ስም',
+                  labelStyle: TextStyle(color: Colors.amber)),
+            ),
+            TextField(
+              controller: phoneCtrl,
+              keyboardType: TextInputType.phone,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                  labelText: 'ስልክ ቁጥር',
+                  labelStyle: TextStyle(color: Colors.amber)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('ሰርዝ')),
+          ElevatedButton(
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            onPressed: () async {
+              final name = nameCtrl.text.trim();
+              final phone = phoneCtrl.text.trim();
+              if (name.isEmpty) return;
+              await FirebaseFirestore.instance
+                  .collection('waiters')
+                  .doc(name)
+                  .set({'name': name, 'phone': phone});
+              if (existingName != null && existingName != name) {
+                await FirebaseFirestore.instance
+                    .collection('waiters')
+                    .doc(existingName)
+                    .delete();
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('አስቀምጥ'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _delete(String name) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: const Text('ማረጋገጫ',
+            style: TextStyle(color: Colors.amber)),
+        content: Text('$name ይሰረዝ?',
+            style: const TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('አይ')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('አዎ'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await FirebaseFirestore.instance
+          .collection('waiters')
+          .doc(name)
+          .delete();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.amber.shade900,
+        title: const Text('አስተናጋጆች'),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: Colors.amber,
+        icon: const Icon(Icons.add, color: Colors.black),
+        label: const Text('አዲስ ጨምር',
+            style: TextStyle(color: Colors.black)),
+        onPressed: () => _showForm(),
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Cloud.allSalesTodayStream(),
+        stream: Cloud.waitersStream(),
         builder: (ctx, snap) {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          // ⬇ Filter today on device
-          final now = DateTime.now();
-          final todayStart = DateTime(now.year, now.month, now.day);
-          final all = snap.data!;
-          final sales = all.where((s) {
-            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
-            return ts != null && ts.isAfter(todayStart);
-          }).toList();
-
-          if (sales.isEmpty) {
+          final list = snap.data!;
+          if (list.isEmpty) {
             return const Center(
-              child: Text('ምንም ሽያጭ የለም',
+              child: Text('ምንም አስተናጋጅ የለም',
                   style: TextStyle(color: Colors.white70)),
             );
           }
-          sales.sort((a, b) {
-            final ta = (a['timestamp'] ?? '') as String;
-            final tb = (b['timestamp'] ?? '') as String;
-            return tb.compareTo(ta);
-          });
           return ListView.builder(
-            itemCount: sales.length,
+            itemCount: list.length,
             itemBuilder: (ctx, i) {
-              final s = sales[i];
-              final w = (s['waiter'] ?? '') as String;
-              final c = (s['customer'] ?? '') as String;
-              final ts =
-                  DateTime.tryParse((s['timestamp'] ?? '') as String);
-              final isCredit = (s['is_credit'] ?? 0) == 1;
+              final w = list[i];
               return Card(
                 color: const Color(0xFF2A2A2A),
                 margin: const EdgeInsets.symmetric(
@@ -1528,28 +2008,32 @@ class OwnerHistoryScreen extends StatelessWidget {
                   leading: CircleAvatar(
                     backgroundColor: Colors.amber.shade900,
                     child: Text(
-                      w.isEmpty ? '?' : w.substring(0, 1),
+                      (w['name'] as String).substring(0, 1),
                       style: const TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.bold),
                     ),
                   ),
-                  title: Text(
-                    '${s['item_name']} × ${s['quantity']}',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                  subtitle: Text(
-                    '$w${c.isNotEmpty ? " → $c" : ""}${ts != null ? " • ${DateFormat('HH:mm').format(ts)}" : ""}'
-                    '${isCredit ? " • ዱቤ" : ""}',
-                    style: const TextStyle(
-                        color: Colors.white54, fontSize: 12),
-                  ),
-                  trailing: Text(
-                    '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
-                    style: const TextStyle(
-                        color: Colors.amber,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16),
+                  title: Text(w['name'] as String,
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: Text((w['phone'] ?? '') as String,
+                      style: const TextStyle(color: Colors.white54)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit,
+                            color: Colors.amber),
+                        onPressed: () => _showForm(
+                            existingName: w['name'] as String,
+                            existingPhone: (w['phone'] ?? '') as String),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete,
+                            color: Colors.redAccent),
+                        onPressed: () => _delete(w['name'] as String),
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -1561,121 +2045,117 @@ class OwnerHistoryScreen extends StatelessWidget {
   }
 }
 
-// ==================== WAITER CLOUD HISTORY ====================
-class WaiterHistoryScreen extends StatefulWidget {
-  const WaiterHistoryScreen({super.key});
-  @override
-  State<WaiterHistoryScreen> createState() => _WaiterHistoryScreenState();
-}
-
-class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
-  String waiter = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => waiter = prefs.getString('waiterName') ?? '');
-  }
+// ==================== 7-DAY REPORT ====================
+class WeeklyReportScreen extends StatelessWidget {
+  const WeeklyReportScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (waiter.isEmpty) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator()));
-    }
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.amber.shade900,
-        title: Text('$waiter — ሽያጮቼ'),
+        title: const Text('7 ቀን ሪፖርት'),
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Cloud.waiterSalesTodayStream(waiter),
+        stream: Cloud.allSalesStream(),
         builder: (ctx, snap) {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          // ⬇ Filter today on device
           final now = DateTime.now();
-          final todayStart = DateTime(now.year, now.month, now.day);
-          final all = snap.data!;
-          final sales = all.where((s) {
+          final start = DateTime(now.year, now.month, now.day)
+              .subtract(const Duration(days: 6));
+
+          final sales = snap.data!.where((s) {
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
-            return ts != null && ts.isAfter(todayStart);
+            return ts != null && ts.isAfter(start);
           }).toList();
 
-          if (sales.isEmpty) {
-            return const Center(
-              child: Text('ምንም ሽያጭ የለም',
-                  style: TextStyle(color: Colors.white70)),
-            );
+          final byDay = <String, Map<String, dynamic>>{};
+          for (var i = 0; i < 7; i++) {
+            final d = DateTime(start.year, start.month, start.day)
+                .add(Duration(days: i));
+            byDay[DateFormat('yyyy-MM-dd').format(d)] = {
+              'date': d,
+              'total': 0.0,
+              'qty': 0,
+              'count': 0,
+            };
           }
-          sales.sort((a, b) {
-            final ta = (a['timestamp'] ?? '') as String;
-            final tb = (b['timestamp'] ?? '') as String;
-            return tb.compareTo(ta);
-          });
-          double total = 0;
           for (var s in sales) {
-            total += ((s['total_price'] ?? 0) as num).toDouble();
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            if (ts == null) continue;
+            final key = DateFormat('yyyy-MM-dd').format(ts);
+            if (byDay.containsKey(key)) {
+              byDay[key]!['total'] =
+                  (byDay[key]!['total'] as double) +
+                      ((s['total_price'] ?? 0) as num).toDouble();
+              byDay[key]!['qty'] =
+                  (byDay[key]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
+              byDay[key]!['count'] =
+                  (byDay[key]!['count'] as int) + 1;
+            }
           }
-          return Column(
+
+          double grandTotal = 0;
+          for (var d in byDay.values) {
+            grandTotal += (d['total'] as double);
+          }
+
+          final sortedKeys = byDay.keys.toList()..sort((a, b) => b.compareTo(a));
+
+          return ListView(
+            padding: const EdgeInsets.all(12),
             children: [
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                color: Colors.amber.shade900.withOpacity(0.3),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade900.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Column(
                   children: [
-                    Text('${total.toStringAsFixed(0)} ብር',
+                    const Text('የ 7 ቀን ጠቅላላ',
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 14)),
+                    Text('${grandTotal.toStringAsFixed(0)} ብር',
                         style: const TextStyle(
                             color: Colors.amber,
-                            fontSize: 26,
+                            fontSize: 30,
                             fontWeight: FontWeight.bold)),
-                    Text('${sales.length} ሽያጭ',
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13)),
                   ],
                 ),
               ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: sales.length,
-                  itemBuilder: (ctx, i) {
-                    final s = sales[i];
-                    final c = (s['customer'] ?? '') as String;
-                    final ts = DateTime.tryParse(
-                        (s['timestamp'] ?? '') as String);
-                    return Card(
-                      color: const Color(0xFF2A2A2A),
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                      child: ListTile(
-                        title: Text(
-                          '${s['item_name']} × ${s['quantity']}',
-                          style:
-                              const TextStyle(color: Colors.white),
-                        ),
-                        subtitle: Text(
-                          '${c.isNotEmpty ? "$c • " : ""}${ts != null ? DateFormat('HH:mm').format(ts) : ""}',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12),
-                        ),
-                        trailing: Text(
-                          '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
-                          style: const TextStyle(
-                              color: Colors.amber,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
+              const SizedBox(height: 12),
+              ...sortedKeys.map((k) {
+                final d = byDay[k]!;
+                final date = d['date'] as DateTime;
+                final dayLabel = DateFormat('EEE, MMM d').format(date);
+                final isToday = DateTime(now.year, now.month, now.day) ==
+                    DateTime(date.year, date.month, date.day);
+                return Card(
+                  color: isToday
+                      ? Colors.amber.shade900.withOpacity(0.3)
+                      : const Color(0xFF2A2A2A),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    title: Text(dayLabel,
+                        style: TextStyle(
+                            color: isToday ? Colors.amber : Colors.white,
+                            fontWeight: FontWeight.bold)),
+                    subtitle: Text('${d['count']} ሽያጭ • ${d['qty']} ዕቃ',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 12)),
+                    trailing: Text(
+                      '${(d['total'] as double).toStringAsFixed(0)} ብር',
+                      style: const TextStyle(
+                          color: Colors.amber,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                );
+              }),
             ],
           );
         },
@@ -1684,7 +2164,7 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
   }
 }
 
-// ==================== ORDERS SCREEN ====================
+// ==================== ORDERS ====================
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
   @override
@@ -1712,10 +2192,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
       context: context,
       backgroundColor: const Color(0xFF1A1A1A),
       isScrollControlled: true,
-      builder: (ctx) => _CustomerEditorSheet(
-        customer: customer,
-        onChanged: _load,
-      ),
+      builder: (ctx) =>
+          _CustomerEditorSheet(customer: customer, onChanged: _load),
     );
     _load();
   }
@@ -1766,7 +2244,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         title: Text(o['customer'] as String,
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 17,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold)),
                         subtitle: Text(
                           '${o['total_qty']} ዕቃ${isCredit ? " • ዱቤ" : ""}',
@@ -1775,20 +2253,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
                                   ? Colors.orange
                                   : Colors.white60),
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '${(o['total_revenue'] as num).toStringAsFixed(0)} ብር',
-                              style: const TextStyle(
-                                  color: Colors.amber,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.edit,
-                                color: Colors.white38, size: 18),
-                          ],
+                        trailing: Text(
+                          '${(o['total_revenue'] as num).toStringAsFixed(0)} ብር',
+                          style: const TextStyle(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16),
                         ),
                       ),
                     );
@@ -1798,14 +2268,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 }
 
-// ==================== CUSTOMER EDITOR SHEET ====================
 class _CustomerEditorSheet extends StatefulWidget {
   final String customer;
   final VoidCallback onChanged;
-  const _CustomerEditorSheet({
-    required this.customer,
-    required this.onChanged,
-  });
+  const _CustomerEditorSheet(
+      {required this.customer, required this.onChanged});
   @override
   State<_CustomerEditorSheet> createState() => _CustomerEditorSheetState();
 }
@@ -1854,88 +2321,15 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
       ),
     );
     if (ok == true) {
-      await DB.deleteSale(saleId);
-      await _load();
-      widget.onChanged();
-    }
-  }
-
-  Future<void> _addItem() async {
-    final menu = await DB.getMenu();
-    if (!mounted) return;
-    final picked = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      backgroundColor: const Color(0xFF1A1A1A),
-      isScrollControlled: true,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        maxChildSize: 0.95,
-        minChildSize: 0.4,
-        expand: false,
-        builder: (ctx2, scrollCtrl) => Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              color: Colors.amber.shade900,
-              child: const Text('ዕቃ ጨምር',
-                  style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold)),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: scrollCtrl,
-                itemCount: menu.length,
-                itemBuilder: (ctx3, i) {
-                  final m = menu[i];
-                  return ListTile(
-                    title: Text(m['name'] as String,
-                        style:
-                            const TextStyle(color: Colors.white)),
-                    subtitle: Text(
-                        '${m['category']} • ${(m['price'] as num).toStringAsFixed(0)} ብር',
-                        style: const TextStyle(color: Colors.white54)),
-                    onTap: () => Navigator.pop(ctx, m),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (picked == null) return;
-
-    final existing = items.firstWhere(
-      (it) => it['item_name'] == picked['name'],
-      orElse: () => {},
-    );
-
-    if (existing.isNotEmpty) {
-      final newQty = (existing['quantity'] as int) + 1;
-      await _changeQty(existing['id'] as int, newQty);
-    } else {
-      final now = DateTime.now().toIso8601String();
-      await DB.saveSales([
-        {
-          'item_id': picked['id'],
-          'item_name': picked['name'],
-          'category': picked['category'],
-          'quantity': 1,
-          'unit_price': picked['price'],
-          'total_price': picked['price'],
-          'waiter': items.isNotEmpty ? items.first['waiter'] : 'OWNER',
-          'customer': widget.customer,
-          'served_with': picked['served_with'] ?? '',
-          'is_credit': items.isNotEmpty ? items.first['is_credit'] : 0,
-          'is_paid': items.isNotEmpty ? items.first['is_paid'] : 1,
-          'payment_method': items.isNotEmpty
-              ? items.first['payment_method']
-              : 'cash',
-          'timestamp': now,
+      final row = await (await DB.database)
+          .query('sales', where: 'id = ?', whereArgs: [saleId]);
+      if (row.isNotEmpty) {
+        final fsId = row.first['firestore_id'] as String?;
+        if (fsId != null && fsId.isNotEmpty) {
+          await Cloud.voidSale(fsId);
         }
-      ]);
+      }
+      await DB.deleteSale(saleId);
       await _load();
       widget.onChanged();
     }
@@ -1968,7 +2362,7 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                   child: Text(widget.customer,
                       style: const TextStyle(
                           color: Colors.black,
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold)),
                 ),
                 Column(
@@ -1976,11 +2370,11 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                   children: [
                     Text('$qty ዕቃ',
                         style: const TextStyle(
-                            color: Colors.black87, fontSize: 12)),
+                            color: Colors.black87, fontSize: 11)),
                     Text('${total.toStringAsFixed(0)} ብር',
                         style: const TextStyle(
                             color: Colors.black,
-                            fontSize: 18,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold)),
                   ],
                 ),
@@ -1990,13 +2384,6 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
           if (loading)
             const Expanded(
                 child: Center(child: CircularProgressIndicator()))
-          else if (items.isEmpty)
-            const Expanded(
-              child: Center(
-                child: Text('ምንም ዕቃ የለም',
-                    style: TextStyle(color: Colors.white70)),
-              ),
-            )
           else
             Expanded(
               child: ListView.builder(
@@ -2004,7 +2391,6 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                 itemCount: items.length,
                 itemBuilder: (ctx3, i) {
                   final it = items[i];
-                  final ts = DateTime.tryParse(it['timestamp'] ?? '');
                   return Card(
                     color: const Color(0xFF2A2A2A),
                     margin: const EdgeInsets.symmetric(
@@ -2014,7 +2400,7 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                           style:
                               const TextStyle(color: Colors.white)),
                       subtitle: Text(
-                        '${it['waiter']} • ${ts != null ? DateFormat('HH:mm').format(ts) : ''} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
+                        '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 12),
                       ),
@@ -2033,7 +2419,7 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                             child: Text('${it['quantity']}',
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
-                                    fontSize: 18,
+                                    fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white)),
                           ),
@@ -2057,26 +2443,6 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                 },
               ),
             ),
-          Container(
-            padding: const EdgeInsets.all(12),
-            color: const Color(0xFF0F0F0F),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.teal,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('ዕቃ ጨምር'),
-                    onPressed: _addItem,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -2164,7 +2530,7 @@ class _CreditScreenState extends State<CreditScreen> {
                       Text('${grandTotal.toStringAsFixed(0)} ብር',
                           style: const TextStyle(
                               color: Colors.orangeAccent,
-                              fontSize: 32,
+                              fontSize: 30,
                               fontWeight: FontWeight.bold)),
                     ],
                   ),
@@ -2179,8 +2545,6 @@ class _CreditScreenState extends State<CreditScreen> {
                           itemCount: credits.length,
                           itemBuilder: (ctx, i) {
                             final c = credits[i];
-                            final ts = DateTime.tryParse(
-                                (c['last_time'] ?? '') as String);
                             return Card(
                               color: const Color(0xFF2A2A2A),
                               margin: const EdgeInsets.symmetric(
@@ -2200,15 +2564,13 @@ class _CreditScreenState extends State<CreditScreen> {
                                 title: Text(c['customer'] as String,
                                     style: const TextStyle(
                                         color: Colors.white,
-                                        fontSize: 17,
+                                        fontSize: 16,
                                         fontWeight: FontWeight.bold)),
                                 subtitle: Text(
-                                  '${c['num_items']} ሽያጭ • ${c['total_qty']} ዕቃ\n${ts != null ? DateFormat('MMM d, HH:mm').format(ts) : ''}',
-                                  style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 12),
-                                ),
-                                isThreeLine: true,
+                                    '${c['num_items']} ሽያጭ • ${c['total_qty']} ዕቃ',
+                                    style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12)),
                                 trailing: Column(
                                   mainAxisAlignment:
                                       MainAxisAlignment.center,
@@ -2331,26 +2693,23 @@ class _MenuScreenState extends State<MenuScreen> {
                   spacing: 8,
                   children: [
                     ChoiceChip(
-                      label: const Text('እንጀራ'),
-                      selected: servedWith == 'እንጀራ',
-                      selectedColor: Colors.amber,
-                      onSelected: (v) => setStateDialog(
-                          () => servedWith = v ? 'እንጀራ' : ''),
-                    ),
+                        label: const Text('እንጀራ'),
+                        selected: servedWith == 'እንጀራ',
+                        selectedColor: Colors.amber,
+                        onSelected: (v) => setStateDialog(
+                            () => servedWith = v ? 'እንጀራ' : '')),
                     ChoiceChip(
-                      label: const Text('ዳቦ'),
-                      selected: servedWith == 'ዳቦ',
-                      selectedColor: Colors.brown,
-                      onSelected: (v) => setStateDialog(
-                          () => servedWith = v ? 'ዳቦ' : ''),
-                    ),
+                        label: const Text('ዳቦ'),
+                        selected: servedWith == 'ዳቦ',
+                        selectedColor: Colors.brown,
+                        onSelected: (v) => setStateDialog(
+                            () => servedWith = v ? 'ዳቦ' : '')),
                     ChoiceChip(
-                      label: const Text('ሌላ'),
-                      selected: servedWith == '',
-                      selectedColor: Colors.grey,
-                      onSelected: (v) =>
-                          setStateDialog(() => servedWith = ''),
-                    ),
+                        label: const Text('ሌላ'),
+                        selected: servedWith == '',
+                        selectedColor: Colors.grey,
+                        onSelected: (v) =>
+                            setStateDialog(() => servedWith = '')),
                   ],
                 ),
               ],
@@ -2358,17 +2717,18 @@ class _MenuScreenState extends State<MenuScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('ሰርዝ'),
-            ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('ሰርዝ')),
             ElevatedButton(
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber),
               onPressed: () async {
                 final name = nameCtrl.text.trim();
-                final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
-                final cat =
-                    catCtrl.text.trim().isEmpty ? 'ሌላ' : catCtrl.text.trim();
+                final price =
+                    double.tryParse(priceCtrl.text.trim()) ?? 0;
+                final cat = catCtrl.text.trim().isEmpty
+                    ? 'ሌላ'
+                    : catCtrl.text.trim();
                 if (name.isEmpty || price <= 0) return;
                 if (existing == null) {
                   await DB.addItem({
@@ -2410,10 +2770,10 @@ class _MenuScreenState extends State<MenuScreen> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('አይ')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('አዎ'),
-          ),
+              style:
+                  ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('አዎ')),
         ],
       ),
     );
@@ -2451,45 +2811,21 @@ class _MenuScreenState extends State<MenuScreen> {
                   child: ListTile(
                     title: Text(item['name'] as String,
                         style: const TextStyle(color: Colors.white)),
-                    subtitle: Row(
-                      children: [
-                        Text(
-                          '${item['category']} • ${(item['price'] as num).toStringAsFixed(0)} ብር',
-                          style: const TextStyle(color: Colors.white54),
-                        ),
-                        if (sw.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: sw == 'እንጀራ'
-                                  ? Colors.amber.shade900
-                                      .withOpacity(0.4)
-                                  : Colors.brown.withOpacity(0.4),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text('በ$sw',
-                                style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11)),
-                          ),
-                        ],
-                      ],
-                    ),
+                    subtitle: Text(
+                        '${item['category']} • ${(item['price'] as num).toStringAsFixed(0)} ብር${sw.isNotEmpty ? " • በ$sw" : ""}',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 12)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon:
-                              const Icon(Icons.edit, color: Colors.amber),
-                          onPressed: () => _showForm(existing: item),
-                        ),
+                            icon: const Icon(Icons.edit,
+                                color: Colors.amber),
+                            onPressed: () => _showForm(existing: item)),
                         IconButton(
-                          icon: const Icon(Icons.delete,
-                              color: Colors.redAccent),
-                          onPressed: () => _delete(item),
-                        ),
+                            icon: const Icon(Icons.delete,
+                                color: Colors.redAccent),
+                            onPressed: () => _delete(item)),
                       ],
                     ),
                   ),
@@ -2500,7 +2836,7 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 }
 
-// ==================== LOCAL HISTORY SCREEN ====================
+// ==================== WAITER LOCAL HISTORY ====================
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
   @override
@@ -2527,9 +2863,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _load() async {
     setState(() => loading = true);
     final all = await DB.getAllSales();
-    sales = all
-        .where((s) => (s['waiter'] ?? '') == waiterName)
-        .toList();
+    sales =
+        all.where((s) => (s['waiter'] ?? '') == waiterName).toList();
     setState(() => loading = false);
   }
 
@@ -2548,7 +2883,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return;
       }
       final rows = <List<dynamic>>[
-        ['ID', 'Date', 'Time', 'Waiter', 'Customer', 'Category', 'Item', 'Served With', 'Qty', 'Unit Price', 'Total', 'Credit', 'Paid', 'Payment']
+        [
+          'ID',
+          'Date',
+          'Time',
+          'Waiter',
+          'Customer',
+          'Category',
+          'Item',
+          'Qty',
+          'Unit Price',
+          'Total',
+          'Payment'
+        ]
       ];
       for (var s in mine) {
         final ts = DateTime.parse(s['timestamp'] as String);
@@ -2560,12 +2907,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
           s['customer'] ?? '',
           s['category'],
           s['item_name'],
-          s['served_with'] ?? '',
           s['quantity'],
           s['unit_price'],
           s['total_price'],
-          (s['is_credit'] ?? 0) == 1 ? 'YES' : 'NO',
-          (s['is_paid'] ?? 1) == 1 ? 'YES' : 'NO',
           s['payment_method'] ?? 'cash',
         ]);
       }
@@ -2584,7 +2928,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('CSV ተቀምጧል:\n${file.path}'),
+            content: Text('CSV: ${file.path}'),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 6)),
       );
@@ -2597,11 +2941,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  String _payLabel(String key) {
-    for (var p in paymentMethods) {
-      if (p['key'] == key) return p['label'] as String;
+  Future<void> _deleteSale(Map<String, dynamic> s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: const Text('ሽያጭ ይሰረዝ?',
+            style: TextStyle(color: Colors.amber)),
+        content: Text('${s['item_name']} × ${s['quantity']}',
+            style: const TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('አይ')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('አዎ'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      final fsId = s['firestore_id'] as String?;
+      if (fsId != null && fsId.isNotEmpty) {
+        await Cloud.voidSale(fsId);
+      }
+      await DB.deleteSale(s['id'] as int);
+      _load();
     }
-    return key;
   }
 
   @override
@@ -2627,37 +2995,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   itemBuilder: (ctx, i) {
                     final s = sales[i];
                     final ts = DateTime.parse(s['timestamp'] as String);
-                    final customer = (s['customer'] as String?) ?? '';
-                    final isCredit = (s['is_credit'] ?? 0) == 1;
-                    final isPaid = (s['is_paid'] ?? 1) == 1;
-                    final pm =
-                        (s['payment_method'] as String?) ?? 'cash';
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 4),
                       child: ListTile(
+                        onLongPress: () => _deleteSale(s),
                         title: Text(
-                          '${s['item_name']} × ${s['quantity']}',
-                          style: const TextStyle(color: Colors.white),
-                        ),
+                            '${s['item_name']} × ${s['quantity']}',
+                            style:
+                                const TextStyle(color: Colors.white)),
                         subtitle: Text(
-                          '${customer.isNotEmpty ? "$customer • " : ""}${DateFormat('MMM d, HH:mm').format(ts)}'
-                          '${isCredit ? " • ዱቤ ${isPaid ? "✓" : "⏳"}" : " • ${_payLabel(pm)}"}',
-                          style: TextStyle(
-                              color: isCredit && !isPaid
-                                  ? Colors.orangeAccent
-                                  : Colors.white54,
-                              fontSize: 12),
-                        ),
-                        isThreeLine: true,
+                            '${s['customer'] ?? ""} • ${DateFormat('MMM d, HH:mm').format(ts)}',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12)),
                         trailing: Text(
-                          '${(s['total_price'] as num).toStringAsFixed(0)} ብር',
-                          style: const TextStyle(
-                              color: Colors.amber,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16),
-                        ),
+                            '${(s['total_price'] as num).toStringAsFixed(0)} ብር',
+                            style: const TextStyle(
+                                color: Colors.amber,
+                                fontWeight: FontWeight.bold)),
                       ),
                     );
                   },
@@ -2666,7 +3022,116 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
-// ==================== REPORTS SCREEN ====================
+// ==================== WAITER CLOUD HISTORY ====================
+class WaiterHistoryScreen extends StatefulWidget {
+  const WaiterHistoryScreen({super.key});
+  @override
+  State<WaiterHistoryScreen> createState() => _WaiterHistoryScreenState();
+}
+
+class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
+  String waiter = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => waiter = prefs.getString('waiterName') ?? '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (waiter.isEmpty) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.amber.shade900,
+        title: Text('$waiter — ሽያጮቼ'),
+      ),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: Cloud.waiterSalesStream(waiter),
+        builder: (ctx, snap) {
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          final sales = snap.data!.where((s) {
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ts != null && ts.isAfter(todayStart);
+          }).toList();
+          if (sales.isEmpty) {
+            return const Center(
+                child: Text('ምንም ሽያጭ የለም',
+                    style: TextStyle(color: Colors.white70)));
+          }
+          double total = 0;
+          for (var s in sales) {
+            total += ((s['total_price'] ?? 0) as num).toDouble();
+          }
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                color: Colors.amber.shade900.withOpacity(0.3),
+                child: Column(
+                  children: [
+                    Text('${total.toStringAsFixed(0)} ብር',
+                        style: const TextStyle(
+                            color: Colors.amber,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold)),
+                    Text('${sales.length} ሽያጭ',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: sales.length,
+                  itemBuilder: (ctx, i) {
+                    final s = sales[i];
+                    final ts = DateTime.tryParse(
+                        (s['timestamp'] ?? '') as String);
+                    return Card(
+                      color: const Color(0xFF2A2A2A),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      child: ListTile(
+                        title: Text(
+                            '${s['item_name']} × ${s['quantity']}',
+                            style: const TextStyle(color: Colors.white)),
+                        subtitle: Text(
+                            '${s['customer'] ?? ""} • ${ts != null ? DateFormat('HH:mm').format(ts) : ""}',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12)),
+                        trailing: Text(
+                            '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
+                            style: const TextStyle(
+                                color: Colors.amber,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ==================== REPORTS ====================
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
   @override
@@ -2747,41 +3212,27 @@ class _ReportsScreenState extends State<ReportsScreen> {
       body: ListView(
         children: [
           Container(
-            width: double.infinity,
             padding: const EdgeInsets.all(16),
             color: Colors.amber.shade900.withOpacity(0.3),
             child: Column(
               children: [
                 const Text('የኔ ጠቅላላ ሽያጭ',
                     style: TextStyle(
-                        color: Colors.white70, fontSize: 15)),
+                        color: Colors.white70, fontSize: 14)),
                 Text('${grandTotal.toStringAsFixed(0)} ብር',
                     style: const TextStyle(
                         color: Colors.amber,
-                        fontSize: 28,
+                        fontSize: 26,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('🍽️ እንጀራ: $grandEnjera',
-                        style: const TextStyle(
-                            color: Colors.amber, fontSize: 13)),
-                    const SizedBox(width: 12),
-                    Text('🍞 ዳቦ: $grandBread',
-                        style: const TextStyle(
-                            color: Colors.brown, fontSize: 13)),
-                    const SizedBox(width: 12),
-                    Text('ዕቃዎች: $grandQty',
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13)),
-                  ],
-                ),
+                Text('🍽️ እንጀራ: $grandEnjera  |  🍞 ዳቦ: $grandBread  |  ዕቃ: $grandQty',
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(12),
             color: const Color(0xFF1F1F1F),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2791,24 +3242,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         color: Colors.amber,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
-                _payRow(Icons.payments, 'ጥሬ ገንዘብ', cashTotal,
-                    Colors.green),
+                _payRow(Icons.payments, 'ጥሬ', cashTotal, Colors.green),
                 _payRow(Icons.account_balance, 'CBE', cbeTotal,
                     Colors.purple),
                 _payRow(Icons.phone_android, 'ቴሌብር', telebirrTotal,
                     Colors.lightBlue),
-                _payRow(Icons.credit_card, 'ዱቤ (Credit)', creditTotal,
+                _payRow(Icons.credit_card, 'ዱቤ', creditTotal,
                     Colors.orange),
               ],
             ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text('ዝርዝር:',
-                style: TextStyle(
-                    color: Colors.amber,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15)),
           ),
           ...summary.map((s) {
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
@@ -2816,16 +3258,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
               title: Text('${s['item_name']} × ${s['quantity']}',
                   style: const TextStyle(color: Colors.white)),
               subtitle: Text(
-                '${(s['customer'] as String?)?.isNotEmpty == true ? "${s['customer']} • " : ""}'
-                '${ts != null ? DateFormat('MMM d, HH:mm').format(ts) : ""}',
-                style: const TextStyle(
-                    color: Colors.white54, fontSize: 12),
-              ),
+                  ts != null ? DateFormat('MMM d, HH:mm').format(ts) : '',
+                  style: const TextStyle(
+                      color: Colors.white54, fontSize: 12)),
               trailing: Text(
-                '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
-                style: const TextStyle(
-                    color: Colors.amber, fontWeight: FontWeight.bold),
-              ),
+                  '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
+                  style: const TextStyle(
+                      color: Colors.amber, fontWeight: FontWeight.bold)),
             );
           }),
         ],
@@ -2841,9 +3280,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
           Icon(icon, color: color, size: 18),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(label,
-                style: const TextStyle(color: Colors.white)),
-          ),
+              child: Text(label,
+                  style: const TextStyle(color: Colors.white))),
           Text('${amount.toStringAsFixed(0)} ብር',
               style: TextStyle(
                   color: color,
