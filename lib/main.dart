@@ -11,7 +11,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: 'AIzaSyCie8MQ4WD6m8Lx3INRs8Dqv2_QlvJrCXk',
+        appId: '1:450729365791:android:e848771a35ee48406b202a',
+        messagingSenderId: '450729365791',
+        projectId: 'merishiro-927ee',
+        storageBucket: 'merishiro-927ee.firebasestorage.app',
+      ),
+    );
     runApp(const SalesApp());
   } catch (e, stack) {
     runApp(MaterialApp(
