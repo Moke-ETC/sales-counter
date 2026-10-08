@@ -161,7 +161,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-// ==================== SETUP ====================
+// ==================== SETUP (FIXED — ቀጥል ALWAYS VISIBLE) ====================
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
   @override
@@ -198,101 +198,115 @@ class _SetupScreenState extends State<SetupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 30),
-              const Icon(Icons.restaurant, size: 70, color: Colors.amber),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+              const Icon(Icons.restaurant, size: 60, color: Colors.amber),
+              const SizedBox(height: 10),
               const Text('ሜሪ ሽሮ',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       color: Colors.amber,
-                      fontSize: 30,
+                      fontSize: 28,
                       fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               const Text('ማዋቀር',
                   textAlign: TextAlign.center,
                   style:
-                      TextStyle(color: Colors.white70, fontSize: 15)),
-              const SizedBox(height: 30),
+                      TextStyle(color: Colors.white70, fontSize: 14)),
+              const SizedBox(height: 20),
               const Text('እርስዎ ማን ነዎት?',
                   style: TextStyle(
                       color: Colors.white,
-                      fontSize: 17,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold)),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               _roleCard('ባለቤት (Owner)', 'ሁሉንም ሽያጮች ይመልከቱ',
                   Icons.admin_panel_settings, role == 'owner',
                   () => setState(() {
                         role = 'owner';
                         waiter = null;
                       })),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               _roleCard('አስተናጋጅ (Waiter)', 'የራስዎን ሽያጭ ብቻ',
                   Icons.person, role == 'waiter',
                   () => setState(() => role = 'waiter')),
               if (role == 'waiter') ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 const Text('ስምዎን ይምረጡ:',
                     style: TextStyle(
                         color: Colors.white,
                         fontSize: 15,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
-                ...waiters.map((w) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: InkWell(
-                        onTap: () => setState(() => waiter = w['name']),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: waiter == w['name']
-                                ? Colors.amber.shade900
-                                : const Color(0xFF2A2A2A),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: waiter == w['name']
-                                  ? Colors.amber
-                                  : Colors.white24,
-                              width: 2,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.person,
-                                  color: waiter == w['name']
-                                      ? Colors.black
-                                      : Colors.amber),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(w['name']!,
-                                        style: TextStyle(
+                // Scrollable waiter list
+                Expanded(
+                  child: ListView(
+                    children: waiters
+                        .map((w) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: InkWell(
+                                onTap: () =>
+                                    setState(() => waiter = w['name']),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: waiter == w['name']
+                                        ? Colors.amber.shade900
+                                        : const Color(0xFF2A2A2A),
+                                    borderRadius:
+                                        BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: waiter == w['name']
+                                          ? Colors.amber
+                                          : Colors.white24,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.person,
                                           color: waiter == w['name']
                                               ? Colors.black
-                                              : Colors.white,
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.w600,
-                                        )),
-                                    Text(w['phone']!,
-                                        style: TextStyle(
-                                          color: waiter == w['name']
-                                              ? Colors.black54
-                                              : Colors.white54,
-                                          fontSize: 12,
-                                        )),
-                                  ],
+                                              : Colors.amber),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(w['name']!,
+                                                style: TextStyle(
+                                                  color: waiter ==
+                                                          w['name']
+                                                      ? Colors.black
+                                                      : Colors.white,
+                                                  fontSize: 17,
+                                                  fontWeight:
+                                                      FontWeight.w600,
+                                                )),
+                                            Text(w['phone']!,
+                                                style: TextStyle(
+                                                  color: waiter ==
+                                                          w['name']
+                                                      ? Colors.black54
+                                                      : Colors.white54,
+                                                  fontSize: 12,
+                                                )),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    )),
-              ],
-              const Spacer(),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ] else
+                const Spacer(),
+              const SizedBox(height: 12),
+              // ቀጥል button always visible
               ElevatedButton.icon(
                 icon: const Icon(Icons.check, color: Colors.black),
                 label: const Text('ቀጥል',
