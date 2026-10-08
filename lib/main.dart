@@ -299,7 +299,7 @@ class _SetupScreenState extends State<SetupScreen> {
       waiters =
           defaultWaiters.map((w) => Map<String, dynamic>.from(w)).toList();
     }
-    setState(() => loading = false);
+    if (mounted) setState(() => loading = false);
   }
 
   Future<void> _save() async {
@@ -534,36 +534,34 @@ class DB {
     ''');
 
     final menu = [
-      {'name': 'ኖርማል ፉል', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
+      {'name': 'የርማል ፉል', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'ስፔሻል ፉል', 'price': 140.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንጀራ ፍርፍር', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-      {'name': 'ስፔሻል ፍርፍር', 'price': 180.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-      {'name': 'አንቁላል ፍርፍር', 'price': 180.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-      {'name': 'አንቁላል ስልስ', 'price': 180.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
+      {'name': 'ስፔሻል ፍርፍር', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
+      {'name': 'አንቁላል ፍርፍር', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
+      {'name': 'አንቁላል ስልስ', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንቁላል በስጋ', 'price': 250.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
       {'name': 'በያይነት', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ፓስታ በስጋ', 'price': 110.0, 'category': 'ምሳ', 'served_with': ''},
       {'name': 'ፓስታ ባትካልት', 'price': 130.0, 'category': 'ምሳ', 'served_with': ''},
-      {'name': 'ኖርማል ድንች', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'የርማል ድንች', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ጎመን', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ ፋስስ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ ፋስክ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ቲማቲም ለብለብ', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ተጋቢኖ', 'price': 150.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ስፔሻል', 'price': 230.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ጎመን በስጋ', 'price': 250.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ዱለት', 'price': 330.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ጥብስ', 'price': 350.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ዱለት', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ድንች በስጋ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ ባይባይ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ በቅቤ', 'price': 200.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ፓስታ በስጋ', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ግማሽ አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
-      {'name': 'ዳቦ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
-      {'name': '2 ሊትር ውሃ', 'price': 70.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': '1 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': '0.5 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': 'ለስላሳ መጠጦች', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': 'የተቀቀለ እንቁላል ', 'price': 30.0, 'category': 'ተጨማሪ', 'served_with': ''},
-      {'name': 'ፖስታ በእንቁላል ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ ባይባይ', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ በቅቤ', 'price': 150.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ቅቅል', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ጎመን አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
+      {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
+      {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': '0.5 ሊትር ውሃ', 'price': 25.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': 'ለስላሳ መጠጦች', 'price': 50.0, 'category': 'መጠጦች', 'served_with': ''},
     ];
     for (var item in menu) {
       await db.insert('menu_items', item);
@@ -710,7 +708,7 @@ class Cloud {
       final ref = await _db.collection('sales').add({
         ...row,
         'serverTime': FieldValue.serverTimestamp(),
-      });
+      }).timeout(const Duration(seconds: 5));
       return ref.id;
     } catch (e) {
       return null;
@@ -722,7 +720,7 @@ class Cloud {
       final ref = await _db.collection('payments').add({
         ...row,
         'serverTime': FieldValue.serverTimestamp(),
-      });
+      }).timeout(const Duration(seconds: 5));
       return ref.id;
     } catch (e) {
       return null;
@@ -731,7 +729,8 @@ class Cloud {
 
   static Future<void> voidSale(String fsId) async {
     try {
-      await _db.collection('sales').doc(fsId).update({'voided': 1});
+      await _db.collection('sales').doc(fsId).update({'voided': 1})
+          .timeout(const Duration(seconds: 5));
     } catch (e) {}
   }
 
@@ -776,55 +775,71 @@ class Inventory {
   }
 
   static Future<Map<String, int>> getStock() async {
-    final snap = await _db.collection('inventory').doc('stock').get();
-    final d = snap.data() ?? {};
-    return {'enjera': (d['enjera'] ?? 0) as int, 'bread': (d['bread'] ?? 0) as int};
+    try {
+      final snap = await _db.collection('inventory').doc('stock').get()
+          .timeout(const Duration(seconds: 5));
+      final d = snap.data() ?? {};
+      return {'enjera': (d['enjera'] ?? 0) as int, 'bread': (d['bread'] ?? 0) as int};
+    } catch (e) {
+      return {'enjera': 0, 'bread': 0};
+    }
   }
 
   static Future<void> setStock(int enjera, int bread) async {
-    await _db.collection('inventory').doc('stock').set({
-      'enjera': enjera, 'bread': bread,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await _db.collection('inventory').doc('stock').set({
+        'enjera': enjera, 'bread': bread,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }).timeout(const Duration(seconds: 5));
+    } catch (e) {}
   }
 
   static Future<void> addStock(int enjera, int bread) async {
-    final updates = <String, dynamic>{};
-    if (enjera != 0) updates['enjera'] = FieldValue.increment(enjera);
-    if (bread != 0) updates['bread'] = FieldValue.increment(bread);
-    if (updates.isEmpty) return;
-    updates['updatedAt'] = FieldValue.serverTimestamp();
-    await _db.collection('inventory').doc('stock').set(updates, SetOptions(merge: true));
+    try {
+      final updates = <String, dynamic>{};
+      if (enjera != 0) updates['enjera'] = FieldValue.increment(enjera);
+      if (bread != 0) updates['bread'] = FieldValue.increment(bread);
+      if (updates.isEmpty) return;
+      updates['updatedAt'] = FieldValue.serverTimestamp();
+      await _db.collection('inventory').doc('stock')
+          .set(updates, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 5));
+    } catch (e) {}
   }
 
   static Future<void> deduct(int enjeraQty, int breadQty) async {
-    final updates = <String, dynamic>{};
-    if (enjeraQty > 0) updates['enjera'] = FieldValue.increment(-enjeraQty);
-    if (breadQty > 0) updates['bread'] = FieldValue.increment(-breadQty);
-    if (updates.isEmpty) return;
-    updates['updatedAt'] = FieldValue.serverTimestamp();
-    await _db.collection('inventory').doc('stock').set(updates, SetOptions(merge: true));
+    try {
+      final updates = <String, dynamic>{};
+      if (enjeraQty > 0) updates['enjera'] = FieldValue.increment(-enjeraQty);
+      if (breadQty > 0) updates['bread'] = FieldValue.increment(-breadQty);
+      if (updates.isEmpty) return;
+      updates['updatedAt'] = FieldValue.serverTimestamp();
+      await _db.collection('inventory').doc('stock')
+          .set(updates, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 5));
+    } catch (e) {}
   }
 
   static Future<void> restore(int enjeraQty, int breadQty) async {
-    final updates = <String, dynamic>{};
-    if (enjeraQty > 0) updates['enjera'] = FieldValue.increment(enjeraQty);
-    if (breadQty > 0) updates['bread'] = FieldValue.increment(breadQty);
-    if (updates.isEmpty) return;
-    updates['updatedAt'] = FieldValue.serverTimestamp();
-    await _db.collection('inventory').doc('stock').set(updates, SetOptions(merge: true));
+    try {
+      final updates = <String, dynamic>{};
+      if (enjeraQty > 0) updates['enjera'] = FieldValue.increment(enjeraQty);
+      if (breadQty > 0) updates['bread'] = FieldValue.increment(breadQty);
+      if (updates.isEmpty) return;
+      updates['updatedAt'] = FieldValue.serverTimestamp();
+      await _db.collection('inventory').doc('stock')
+          .set(updates, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 5));
+    } catch (e) {}
   }
 }
 
 // ==================== HELPERS ====================
-/// Compute credit balances from sales + payments.
-/// Returns map: customer -> {credit, paid, balance, orders}
 Map<String, Map<String, dynamic>> computeCreditLedger(
     List<Map<String, dynamic>> sales,
     List<Map<String, dynamic>> payments) {
   final map = <String, Map<String, dynamic>>{};
 
-  // Add credit sales
   for (var s in sales) {
     if ((s['is_credit'] ?? 0) != 1) continue;
     if ((s['voided'] ?? 0) == 1) continue;
@@ -849,27 +864,22 @@ Map<String, Map<String, dynamic>> computeCreditLedger(
     }
   }
 
-  // Subtract payments
   for (var p in payments) {
     final c = (p['customer'] ?? '') as String;
     if (c.isEmpty) continue;
-    if (!map.containsKey(c)) {
-      // Payment for a customer with no outstanding credit — still track
-      map.putIfAbsent(c, () => {
-            'customer': c,
-            'credit': 0.0,
-            'paid': 0.0,
-            'balance': 0.0,
-            'order_count': 0,
-            'qty': 0,
-            'last_time': '',
-          });
-    }
+    map.putIfAbsent(c, () => {
+          'customer': c,
+          'credit': 0.0,
+          'paid': 0.0,
+          'balance': 0.0,
+          'order_count': 0,
+          'qty': 0,
+          'last_time': '',
+        });
     map[c]!['paid'] =
         (map[c]!['paid'] as double) + ((p['amount'] ?? 0) as num).toDouble();
   }
 
-  // Compute balance
   for (var c in map.keys) {
     map[c]!['balance'] =
         (map[c]!['credit'] as double) - (map[c]!['paid'] as double);
@@ -910,6 +920,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final customerCtrl = TextEditingController();
   bool isCredit = false;
   String paymentMethod = 'cash';
+  bool _saving = false;
 
   @override
   void initState() {
@@ -966,16 +977,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _confirm() async {
+    if (_saving) return;
     final cartRows = cart.where((c) => c.qty > 0).toList();
     if (cartRows.isEmpty) return;
+
     final customer = customerCtrl.text.trim();
+
     if (isCredit && customer.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('ዱቤ ለመመዝገብ የደንበኛ ስም ያስፈልጋል'),
           backgroundColor: Colors.orange));
       return;
     }
+
+    setState(() => _saving = true);
+
+    final wasCredit = isCredit;
+    final wasPayment = paymentMethod;
+    final enjDeduct = enjeraCount;
+    final brdDeduct = breadCount;
     final timestamp = DateTime.now().toIso8601String();
+
+    // Step 1: Save locally (fast, always works)
+    final localIds = <int, Map<String, dynamic>>{};
     for (var c in cartRows) {
       final row = {
         'item_id': c.id,
@@ -987,33 +1011,51 @@ class _HomeScreenState extends State<HomeScreen> {
         'waiter': waiterName,
         'customer': customer,
         'served_with': c.servedWith,
-        'is_credit': isCredit ? 1 : 0,
-        'is_paid': isCredit ? 0 : 1,
-        'payment_method': isCredit ? 'credit' : paymentMethod,
+        'is_credit': wasCredit ? 1 : 0,
+        'is_paid': wasCredit ? 0 : 1,
+        'payment_method': wasCredit ? 'credit' : wasPayment,
         'voided': 0,
         'timestamp': timestamp,
       };
-      final localId = await DB.saveSaleRow({...row, 'firestore_id': ''});
-      final fsId = await Cloud.pushSale(row);
-      if (fsId != null) await DB.updateSaleFirestoreId(localId, fsId);
+      try {
+        final localId = await DB.saveSaleRow({...row, 'firestore_id': ''});
+        localIds[localId] = row;
+      } catch (e) {
+        // Even if local fails (shouldn't), continue
+      }
     }
-    await Inventory.deduct(enjeraCount, breadCount);
+
+    // Step 2: Reset UI immediately (guaranteed)
     setState(() {
       for (var c in cart) c.qty = 0;
       customerCtrl.clear();
       isCredit = false;
       paymentMethod = 'cash';
+      _saving = false;
     });
+
     if (!mounted) return;
-    final payLabel = isCredit
-        ? 'ዱቤ'
-        : paymentMethods.firstWhere((p) => p['key'] == paymentMethod)['label'];
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(
-          'ሽያጭ ተመዝግቧል ✅ ($waiterName) • $payLabel${customer.isNotEmpty ? " — $customer" : ""}'),
-      backgroundColor: isCredit ? Colors.orange : Colors.green,
+          'ሽያጭ ተመዝግቧል ✅ ($waiterName)${customer.isNotEmpty ? " — $customer" : ""}'),
+      backgroundColor: wasCredit ? Colors.orange : Colors.green,
       duration: const Duration(seconds: 2),
     ));
+
+    // Step 3: Fire-and-forget cloud sync (doesn't block UI)
+    Future.microtask(() async {
+      for (var entry in localIds.entries) {
+        try {
+          final fsId = await Cloud.pushSale(entry.value);
+          if (fsId != null) {
+            await DB.updateSaleFirestoreId(entry.key, fsId);
+          }
+        } catch (_) {}
+      }
+      try {
+        await Inventory.deduct(enjDeduct, brdDeduct);
+      } catch (_) {}
+    });
   }
 
   Future<void> _logout() async {
@@ -1066,6 +1108,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          // Stock banner - live (KEPT)
           StreamBuilder<Map<String, int>>(
             stream: Inventory.stockStream(),
             builder: (ctx, snap) {
@@ -1351,15 +1394,21 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             ElevatedButton.icon(
-              icon: Icon(isCredit ? Icons.credit_card : Icons.check, size: 20),
-              label: Text(isCredit ? 'በዱቤ' : 'አረጋግጥ'),
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
+                  : Icon(isCredit ? Icons.credit_card : Icons.check, size: 20),
+              label: Text(_saving ? '...' : (isCredit ? 'በዱቤ' : 'አረጋግጥ')),
               style: ElevatedButton.styleFrom(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 backgroundColor: isCredit ? Colors.orange : Colors.green,
                 foregroundColor: Colors.white,
               ),
-              onPressed: totalItems == 0 ? null : _confirm,
+              onPressed: (totalItems == 0 || _saving) ? null : _confirm,
             ),
           ],
         ),
@@ -1458,7 +1507,8 @@ class _OwnerScreenState extends State<OwnerScreen> {
       final snap = await FirebaseFirestore.instance
           .collection('sales')
           .orderBy('timestamp', descending: true)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 10));
       if (snap.docs.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1571,6 +1621,15 @@ class _OwnerScreenState extends State<OwnerScreen> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: Cloud.allSalesStream(),
               builder: (ctx, snap) {
+                if (snap.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text('ስህተት: ${snap.error}',
+                          style: const TextStyle(color: Colors.red)),
+                    ),
+                  );
+                }
                 if (!snap.hasData) {
                   return const Center(
                     child: Column(
@@ -1795,7 +1854,7 @@ class _OwnerScreenState extends State<OwnerScreen> {
   }
 }
 
-// ==================== CREDIT SCREEN (Customer Ledger) ====================
+// ==================== CREDIT SCREEN ====================
 class CreditScreen extends StatelessWidget {
   const CreditScreen({super.key});
 
@@ -1809,22 +1868,38 @@ class CreditScreen extends StatelessWidget {
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: Cloud.allSalesStream(),
         builder: (ctxS, snapS) {
+          if (snapS.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error, color: Colors.red, size: 50),
+                    const SizedBox(height: 12),
+                    Text('ስህተት: ${snapS.error}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.red, fontSize: 12)),
+                  ],
+                ),
+              ),
+            );
+          }
           if (!snapS.hasData) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.amber),
+            );
           }
           return StreamBuilder<List<Map<String, dynamic>>>(
             stream: Cloud.allPaymentsStream(),
             builder: (ctxP, snapP) {
-              if (!snapP.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final ledger =
-                  computeCreditLedger(snapS.data!, snapP.data!);
+              final payments = snapP.data ?? [];
+              final ledger = computeCreditLedger(snapS.data!, payments);
               final list = ledger.values
                   .where((c) => (c['balance'] as double) > 0.01)
                   .toList();
-              list.sort((a, b) => (b['last_time'] as String)
-                  .compareTo(a['last_time'] as String));
+              list.sort((a, b) =>
+                  (b['last_time'] as String).compareTo(a['last_time'] as String));
 
               double grandCredit = 0, grandPaid = 0, grandBalance = 0;
               for (var c in ledger.values) {
@@ -1835,7 +1910,6 @@ class CreditScreen extends StatelessWidget {
 
               return Column(
                 children: [
-                  // Grand totals
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
@@ -1845,45 +1919,36 @@ class CreditScreen extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
-                            Column(
-                              children: [
-                                const Text('ጠቅላላ ዱቤ',
-                                    style: TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12)),
-                                Text('${grandCredit.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                        color: Colors.orangeAccent,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            Column(
-                              children: [
-                                const Text('የተከፈለ',
-                                    style: TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12)),
-                                Text('${grandPaid.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                        color: Colors.green,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            Column(
-                              children: [
-                                const Text('ቀሪ',
-                                    style: TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12)),
-                                Text('${grandBalance.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                        color: Colors.amber,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold)),
-                              ],
-                            ),
+                            Column(children: [
+                              const Text('ጠቅላላ ዱቤ',
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
+                              Text('${grandCredit.toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                      color: Colors.orangeAccent,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold)),
+                            ]),
+                            Column(children: [
+                              const Text('የተከፈለ',
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
+                              Text('${grandPaid.toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                      color: Colors.green,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold)),
+                            ]),
+                            Column(children: [
+                              const Text('ቀሪ',
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
+                              Text('${grandBalance.toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                      color: Colors.amber,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold)),
+                            ]),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -1939,10 +2004,12 @@ class CreditScreen extends StatelessWidget {
                                       padding: const EdgeInsets.only(top: 4),
                                       child: Row(
                                         children: [
-                                          _pill('ዱቤ ${credit.toStringAsFixed(0)}',
+                                          _pill(
+                                              'ዱቤ ${credit.toStringAsFixed(0)}',
                                               Colors.orangeAccent),
                                           const SizedBox(width: 4),
-                                          _pill('ተከፈለ ${paid.toStringAsFixed(0)}',
+                                          _pill(
+                                              'ተከፈለ ${paid.toStringAsFixed(0)}',
                                               Colors.green),
                                         ],
                                       ),
@@ -2055,8 +2122,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     OutlinedButton(
-                      onPressed: () => amtCtrl.text =
-                          balance.toStringAsFixed(0),
+                      onPressed: () =>
+                          amtCtrl.text = balance.toStringAsFixed(0),
                       child: Text('ሙሉ ${balance.toStringAsFixed(0)}',
                           style: const TextStyle(color: Colors.green)),
                     ),
@@ -2076,8 +2143,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                           onTap: () => setStateDialog(
                               () => payMethod = pm['key'] as String),
                           child: Container(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 8),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
                             decoration: BoxDecoration(
                               color: sel
                                   ? (pm['color'] as Color).withOpacity(0.25)
@@ -2120,7 +2186,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: const InputDecoration(
                     labelText: 'ማስታወሻ (አማራጭ)',
-                    labelStyle: TextStyle(color: Colors.white54, fontSize: 12),
+                    labelStyle:
+                        TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                 ),
               ],
@@ -2134,8 +2201,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
               onPressed: () async {
-                final amount =
-                    double.tryParse(amtCtrl.text.trim()) ?? 0;
+                final amount = double.tryParse(amtCtrl.text.trim()) ?? 0;
                 if (amount <= 0) return;
                 final prefs = await SharedPreferences.getInstance();
                 final waiter =
@@ -2149,12 +2215,16 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   'payment_method': payMethod,
                   'timestamp': timestamp,
                 };
-                final localId =
-                    await DB.savePaymentRow({...payment, 'firestore_id': ''});
-                final fsId = await Cloud.pushPayment(payment);
-                if (fsId != null) {
-                  await DB.updatePaymentFirestoreId(localId, fsId);
-                }
+                try {
+                  final localId =
+                      await DB.savePaymentRow({...payment, 'firestore_id': ''});
+                  try {
+                    final fsId = await Cloud.pushPayment(payment);
+                    if (fsId != null) {
+                      await DB.updatePaymentFirestoreId(localId, fsId);
+                    }
+                  } catch (_) {}
+                } catch (_) {}
                 if (ctx.mounted) Navigator.pop(ctx, true);
               },
               child: const Text('አስቀምጥ',
@@ -2188,17 +2258,14 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
           return StreamBuilder<List<Map<String, dynamic>>>(
             stream: Cloud.allPaymentsStream(),
             builder: (ctxP, snapP) {
-              if (!snapP.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
+              final payments = snapP.data ?? [];
               final mySales = snapS.data!
                   .where((s) =>
-                      s['customer'] == customer &&
-                      (s['is_credit'] ?? 0) == 1)
+                      s['customer'] == customer && (s['is_credit'] ?? 0) == 1)
                   .toList();
               mySales.sort((a, b) => ((b['timestamp'] ?? '') as String)
                   .compareTo((a['timestamp'] ?? '') as String));
-              final myPayments = snapP.data!
+              final myPayments = payments
                   .where((p) => p['customer'] == customer)
                   .toList();
               myPayments.sort((a, b) => ((b['timestamp'] ?? '') as String)
@@ -2213,17 +2280,14 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
               }
               final balance = credit - paid;
 
-              // Build combined history
               final history = <Map<String, dynamic>>[];
               for (var s in mySales) {
                 history.add({
                   'kind': 'sale',
                   'timestamp': s['timestamp'] ?? '',
                   'amount': ((s['total_price'] ?? 0) as num).toDouble(),
-                  'label':
-                      '${s['item_name']} × ${s['quantity']}${(s['customer'] as String?)?.isNotEmpty == true ? "" : ""}',
+                  'label': '${s['item_name']} × ${s['quantity']}',
                   'by': s['waiter'] ?? '',
-                  'data': s,
                 });
               }
               for (var p in myPayments) {
@@ -2233,7 +2297,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   'amount': ((p['amount'] ?? 0) as num).toDouble(),
                   'label': '💰 ክፍያ ተቀበለ',
                   'by': p['waiter'] ?? '',
-                  'data': p,
                 });
               }
               history.sort((a, b) => (b['timestamp'] as String)
@@ -2241,22 +2304,16 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
 
               return Column(
                 children: [
-                  // Header with totals
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     color: const Color(0xFF1F1F1F),
-                    child: Column(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _statCol('ጠቅላላ ዱቤ', credit, Colors.orangeAccent),
-                            _statCol('የተከፈለ', paid, Colors.green),
-                            _statCol('ቀሪ', balance, Colors.amber,
-                                big: true),
-                          ],
-                        ),
+                        _statCol('ጠቅላላ ዱቤ', credit, Colors.orangeAccent),
+                        _statCol('የተከፈለ', paid, Colors.green),
+                        _statCol('ቀሪ', balance, Colors.amber, big: true),
                       ],
                     ),
                   ),
@@ -2318,8 +2375,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                   ),
                                   title: Text(h['label'] as String,
                                       style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 14)),
+                                          color: Colors.white, fontSize: 14)),
                                   subtitle: Text(
                                     '${h['by']}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
                                     style: const TextStyle(
@@ -2395,6 +2451,7 @@ class _StockManageScreenState extends State<StockManageScreen> {
 
   Future<void> _load() async {
     final stock = await Inventory.getStock();
+    if (!mounted) return;
     setState(() {
       currentEnjera = stock['enjera'] ?? 0;
       currentBread = stock['bread'] ?? 0;
@@ -2677,16 +2734,20 @@ class _WaitersScreenState extends State<WaitersScreen> {
               final name = nameCtrl.text.trim();
               final phone = phoneCtrl.text.trim();
               if (name.isEmpty) return;
-              await FirebaseFirestore.instance
-                  .collection('waiters')
-                  .doc(name)
-                  .set({'name': name, 'phone': phone});
-              if (existingName != null && existingName != name) {
+              try {
                 await FirebaseFirestore.instance
                     .collection('waiters')
-                    .doc(existingName)
-                    .delete();
-              }
+                    .doc(name)
+                    .set({'name': name, 'phone': phone})
+                    .timeout(const Duration(seconds: 5));
+                if (existingName != null && existingName != name) {
+                  await FirebaseFirestore.instance
+                      .collection('waiters')
+                      .doc(existingName)
+                      .delete()
+                      .timeout(const Duration(seconds: 5));
+                }
+              } catch (_) {}
               if (ctx.mounted) Navigator.pop(ctx);
             },
             child: const Text('አስቀምጥ'),
@@ -2701,7 +2762,8 @@ class _WaitersScreenState extends State<WaitersScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF2A2A2A),
-        title: const Text('ማረጋገጫ', style: TextStyle(color: Colors.amber)),
+        title:
+            const Text('ማረጋገጫ', style: TextStyle(color: Colors.amber)),
         content: Text('$name ይሰረዝ?',
             style: const TextStyle(color: Colors.white)),
         actions: [
@@ -2717,10 +2779,13 @@ class _WaitersScreenState extends State<WaitersScreen> {
       ),
     );
     if (ok == true) {
-      await FirebaseFirestore.instance
-          .collection('waiters')
-          .doc(name)
-          .delete();
+      try {
+        await FirebaseFirestore.instance
+            .collection('waiters')
+            .doc(name)
+            .delete()
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
     }
   }
 
@@ -2740,6 +2805,15 @@ class _WaitersScreenState extends State<WaitersScreen> {
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: Cloud.waitersStream(),
         builder: (ctx, snap) {
+          if (snap.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text('ስህተት: ${snap.error}',
+                    style: const TextStyle(color: Colors.red)),
+              ),
+            );
+          }
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -2760,12 +2834,13 @@ class _WaitersScreenState extends State<WaitersScreen> {
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: Colors.amber.shade900,
-                    child: Text((w['name'] as String).substring(0, 1),
+                    child: Text(
+                        ((w['name'] ?? '?') as String).substring(0, 1),
                         style: const TextStyle(
                             color: Colors.black,
                             fontWeight: FontWeight.bold)),
                   ),
-                  title: Text(w['name'] as String,
+                  title: Text((w['name'] ?? '') as String,
                       style: const TextStyle(color: Colors.white)),
                   subtitle: Text((w['phone'] ?? '') as String,
                       style: const TextStyle(color: Colors.white54)),
@@ -3613,6 +3688,11 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: Cloud.waiterSalesStream(waiter),
         builder: (ctx, snap) {
+          if (snap.hasError) {
+            return Center(
+                child: Text('ስህተት: ${snap.error}',
+                    style: const TextStyle(color: Colors.red)));
+          }
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -3742,6 +3822,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         cash += amt;
       }
     }
+    if (!mounted) return;
     setState(() {
       summary = rows;
       grandTotal = t;
