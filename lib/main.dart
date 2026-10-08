@@ -161,7 +161,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-// ==================== SETUP (FIXED — ቀጥል ALWAYS VISIBLE) ====================
+// ==================== SETUP ====================
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
   @override
@@ -237,7 +237,6 @@ class _SetupScreenState extends State<SetupScreen> {
                         fontSize: 15,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
-                // Scrollable waiter list
                 Expanded(
                   child: ListView(
                     children: waiters
@@ -306,7 +305,6 @@ class _SetupScreenState extends State<SetupScreen> {
               ] else
                 const Spacer(),
               const SizedBox(height: 12),
-              // ቀጥል button always visible
               ElevatedButton.icon(
                 icon: const Icon(Icons.check, color: Colors.black),
                 label: const Text('ቀጥል',
@@ -606,7 +604,7 @@ class DB {
   }
 }
 
-// ==================== CLOUD (FIRESTORE) ====================
+// ==================== CLOUD (FIRESTORE) — FIXED ====================
 class Cloud {
   static final _db = FirebaseFirestore.instance;
 
@@ -621,29 +619,25 @@ class Cloud {
     }
   }
 
+  // Get ALL sales — no Firestore filter, filter on device
   static Stream<List<Map<String, dynamic>>> allSalesTodayStream() {
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day).toIso8601String();
     return _db
         .collection('sales')
-        .where('timestamp', isGreaterThanOrEqualTo: start)
         .snapshots()
         .map((snap) => snap.docs
             .map((d) => {...d.data(), 'id': d.id})
             .toList());
   }
 
+  // Get ALL sales — filter by waiter on device
   static Stream<List<Map<String, dynamic>>> waiterSalesTodayStream(
       String waiter) {
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day).toIso8601String();
     return _db
         .collection('sales')
-        .where('waiter', isEqualTo: waiter)
-        .where('timestamp', isGreaterThanOrEqualTo: start)
         .snapshots()
         .map((snap) => snap.docs
             .map((d) => {...d.data(), 'id': d.id})
+            .where((s) => s['waiter'] == waiter)
             .toList());
   }
 }
@@ -1236,7 +1230,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ==================== OWNER SCREEN ====================
+// ==================== OWNER SCREEN — FIXED (filter on device) ====================
 class OwnerScreen extends StatelessWidget {
   const OwnerScreen({super.key});
 
@@ -1306,7 +1300,15 @@ class OwnerScreen extends StatelessWidget {
             );
           }
 
-          final sales = snap.data!;
+          // ⬇ Filter today's sales on device
+          final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          final allSales = snap.data!;
+          final sales = allSales.where((s) {
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ts != null && ts.isAfter(todayStart);
+          }).toList();
+
           final byWaiter = <String, Map<String, dynamic>>{};
           double grandTotal = 0;
           int grandQty = 0;
@@ -1473,7 +1475,7 @@ class OwnerScreen extends StatelessWidget {
   }
 }
 
-// ==================== OWNER HISTORY ====================
+// ==================== OWNER HISTORY — FIXED ====================
 class OwnerHistoryScreen extends StatelessWidget {
   const OwnerHistoryScreen({super.key});
   @override
@@ -1489,7 +1491,15 @@ class OwnerHistoryScreen extends StatelessWidget {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final sales = snap.data!;
+          // ⬇ Filter today on device
+          final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          final all = snap.data!;
+          final sales = all.where((s) {
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ts != null && ts.isAfter(todayStart);
+          }).toList();
+
           if (sales.isEmpty) {
             return const Center(
               child: Text('ምንም ሽያጭ የለም',
@@ -1589,7 +1599,15 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final sales = snap.data!;
+          // ⬇ Filter today on device
+          final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          final all = snap.data!;
+          final sales = all.where((s) {
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ts != null && ts.isAfter(todayStart);
+          }).toList();
+
           if (sales.isEmpty) {
             return const Center(
               child: Text('ምንም ሽያጭ የለም',
