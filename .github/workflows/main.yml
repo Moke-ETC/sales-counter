@@ -28,20 +28,7 @@ jobs:
           flutter create --project-name meri_shiro --org com.moke.etc --platforms android .
           rm -f test/widget_test.dart
 
-      - name: Copy google-services.json into android/app
-        run: |
-          if [ ! -f firebase/google-services.json ]; then
-            echo "❌ firebase/google-services.json missing!"
-            exit 1
-          fi
-          cp firebase/google-services.json android/app/google-services.json
-          echo "✅ copied. Size:"
-          wc -c android/app/google-services.json
-          echo "First 150 chars:"
-          head -c 150 android/app/google-services.json
-          echo ""
-
-      - name: Patch Gradle for Firebase
+      - name: Patch Gradle
         run: |
           cat > android/build.gradle << 'EOF'
           buildscript {
@@ -53,7 +40,6 @@ jobs:
               dependencies {
                   classpath 'com.android.tools.build:gradle:8.1.2'
                   classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-                  classpath 'com.google.gms:google-services:4.4.0'
               }
           }
 
@@ -77,15 +63,8 @@ jobs:
           }
           EOF
 
-          if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
-            echo 'apply plugin: "com.google.gms.google-services"' >> android/app/build.gradle
-          fi
-
           sed -i 's/android:label="[^"]*"/android:label="ሜሪ ሽሮ"/g' android/app/src/main/AndroidManifest.xml
           sed -i 's|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-
-          echo "===== app/build.gradle tail ====="
-          tail -5 android/app/build.gradle
 
       - name: Get dependencies
         run: flutter pub get
