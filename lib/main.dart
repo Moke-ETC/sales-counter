@@ -761,33 +761,56 @@ class Cloud {
   }
 }
 
-// ==================== COMBINED PAYMENTS (FIXED) ====================
-class CombinedPayments {
-  static final _refresh = StreamController<void>.broadcast();
-  static bool _listening = false;
+// ==================== PAYMENTS STORE (PERSISTENT) ====================
+class PaymentsStore {
+  static final _controller =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
+  static bool _firestoreListening = false;
 
-  static void _ensureFirestore() {
-    if (_listening) return;
-    _listening = true;
+  static void _initFirestore() {
+    if (_firestoreListening) return;
+    _firestoreListening = true;
     try {
-      Cloud.allPaymentsStream().listen((_) {
-        _refresh.add(null);
+      Cloud.allPaymentsStream().listen((cloudPayments) async {
+        final local = await DB.getAllPayments();
+        if (!_controller.isClosed) {
+          _controller.add(_merge(cloudPayments, local));
+        }
       }, onError: (_) {});
     } catch (_) {}
   }
 
-  /// Call this after saving a payment locally to trigger UI refresh
-  static void notifyLocalChange() {
-    _refresh.add(null);
+  static Stream<List<Map<String, dynamic>>> stream() {
+    _initFirestore();
+    // Emit fresh local data on next microtask
+    Future.microtask(() async {
+      final local = await DB.getAllPayments();
+      if (!_controller.isClosed) _controller.add(local);
+    });
+    return _controller.stream;
   }
 
-  /// Merged stream of local + cloud payments, refreshing on any change
-  static Stream<List<Map<String, dynamic>>> stream() async* {
-    _ensureFirestore();
-    yield await DB.getAllPayments();
-    await for (final _ in _refresh.stream) {
-      yield await DB.getAllPayments();
+  /// Call this after saving a payment — forces all listeners to refresh
+  static Future<void> refresh() async {
+    final local = await DB.getAllPayments();
+    if (!_controller.isClosed) _controller.add(local);
+  }
+
+  static List<Map<String, dynamic>> _merge(
+      List<Map<String, dynamic>> a, List<Map<String, dynamic>> b) {
+    final seen = <String>{};
+    final out = <Map<String, dynamic>>[];
+    for (var p in a) {
+      final k =
+          '${(p['customer'] ?? '').toString().trim()}|${p['amount']}|${p['timestamp']}';
+      if (seen.add(k)) out.add(p);
     }
+    for (var p in b) {
+      final k =
+          '${(p['customer'] ?? '').toString().trim()}|${p['amount']}|${p['timestamp']}';
+      if (seen.add(k)) out.add(p);
+    }
+    return out;
   }
 }
 
@@ -1908,7 +1931,7 @@ class CreditScreen extends StatelessWidget {
             );
           }
           return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: CombinedPayments.stream(),
+            stream: PaymentsStore.stream(),
             builder: (ctxP, snapP) {
               final payments = snapP.data ?? [];
               final ledger = computeCreditLedger(snapS.data!, payments);
@@ -2228,7 +2251,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 try {
                   final localId = await DB.savePaymentRow(
                       {...payment, 'firestore_id': ''});
-                  CombinedPayments.notifyLocalChange();
+                  await PaymentsStore.refresh();
                   if (ctx.mounted) Navigator.pop(ctx, true);
                   Future.microtask(() async {
                     try {
@@ -2292,7 +2315,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: CombinedPayments.stream(),
+            stream: PaymentsStore.stream(),
             builder: (ctxP, snapP) {
               final payments = snapP.data ?? [];
               final mySales = snapS.data!
