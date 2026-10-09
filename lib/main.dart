@@ -760,6 +760,45 @@ class Cloud {
   }
 }
 
+// ==================== COMBINED PAYMENTS ====================
+class CombinedPayments {
+  static String _key(Map<String, dynamic> p) {
+    return '${p['customer']}|${p['amount']}|${p['timestamp']}';
+  }
+
+  /// Stream of ALL payments (Firestore + local), merged and deduped.
+  static Stream<List<Map<String, dynamic>>> stream() async* {
+    // Emit local first (fast)
+    yield await DB.getAllPayments();
+
+    // Then merge with Firestore
+    await for (final cloud in _cloudSafe()) {
+      final local = await DB.getAllPayments();
+      final seen = <String>{};
+      final merged = <Map<String, dynamic>>[];
+      for (var p in cloud) {
+        final k = _key(p);
+        if (seen.add(k)) merged.add(p);
+      }
+      for (var p in local) {
+        final k = _key(p);
+        if (seen.add(k)) merged.add(p);
+      }
+      merged.sort((a, b) => ((b['timestamp'] ?? '') as String)
+          .compareTo((a['timestamp'] ?? '') as String));
+      yield merged;
+    }
+  }
+
+  static Stream<List<Map<String, dynamic>>> _cloudSafe() async* {
+    try {
+      yield* Cloud.allPaymentsStream();
+    } catch (_) {
+      yield [];
+    }
+  }
+}
+
 // ==================== INVENTORY ====================
 class Inventory {
   static final _db = FirebaseFirestore.instance;
@@ -998,7 +1037,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final brdDeduct = breadCount;
     final timestamp = DateTime.now().toIso8601String();
 
-    // Step 1: Save locally (fast, always works)
     final localIds = <int, Map<String, dynamic>>{};
     for (var c in cartRows) {
       final row = {
@@ -1020,12 +1058,9 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         final localId = await DB.saveSaleRow({...row, 'firestore_id': ''});
         localIds[localId] = row;
-      } catch (e) {
-        // Even if local fails (shouldn't), continue
-      }
+      } catch (_) {}
     }
 
-    // Step 2: Reset UI immediately (guaranteed)
     setState(() {
       for (var c in cart) c.qty = 0;
       customerCtrl.clear();
@@ -1042,7 +1077,6 @@ class _HomeScreenState extends State<HomeScreen> {
       duration: const Duration(seconds: 2),
     ));
 
-    // Step 3: Fire-and-forget cloud sync (doesn't block UI)
     Future.microtask(() async {
       for (var entry in localIds.entries) {
         try {
@@ -1108,7 +1142,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Stock banner - live (KEPT)
           StreamBuilder<Map<String, int>>(
             stream: Inventory.stockStream(),
             builder: (ctx, snap) {
@@ -1872,16 +1905,8 @@ class CreditScreen extends StatelessWidget {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error, color: Colors.red, size: 50),
-                    const SizedBox(height: 12),
-                    Text('ስህተት: ${snapS.error}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.red, fontSize: 12)),
-                  ],
-                ),
+                child: Text('ስህተት: ${snapS.error}',
+                    style: const TextStyle(color: Colors.red)),
               ),
             );
           }
@@ -1891,15 +1916,15 @@ class CreditScreen extends StatelessWidget {
             );
           }
           return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: Cloud.allPaymentsStream(),
+            stream: CombinedPayments.stream(),
             builder: (ctxP, snapP) {
               final payments = snapP.data ?? [];
               final ledger = computeCreditLedger(snapS.data!, payments);
               final list = ledger.values
                   .where((c) => (c['balance'] as double) > 0.01)
                   .toList();
-              list.sort((a, b) =>
-                  (b['last_time'] as String).compareTo(a['last_time'] as String));
+              list.sort((a, b) => (b['last_time'] as String)
+                  .compareTo(a['last_time'] as String));
 
               double grandCredit = 0, grandPaid = 0, grandBalance = 0;
               for (var c in ledger.values) {
@@ -1914,47 +1939,12 @@ class CreditScreen extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     color: Colors.orange.shade900.withOpacity(0.4),
-                    child: Column(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            Column(children: [
-                              const Text('ጠቅላላ ዱቤ',
-                                  style: TextStyle(
-                                      color: Colors.white70, fontSize: 12)),
-                              Text('${grandCredit.toStringAsFixed(0)}',
-                                  style: const TextStyle(
-                                      color: Colors.orangeAccent,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold)),
-                            ]),
-                            Column(children: [
-                              const Text('የተከፈለ',
-                                  style: TextStyle(
-                                      color: Colors.white70, fontSize: 12)),
-                              Text('${grandPaid.toStringAsFixed(0)}',
-                                  style: const TextStyle(
-                                      color: Colors.green,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold)),
-                            ]),
-                            Column(children: [
-                              const Text('ቀሪ',
-                                  style: TextStyle(
-                                      color: Colors.white70, fontSize: 12)),
-                              Text('${grandBalance.toStringAsFixed(0)}',
-                                  style: const TextStyle(
-                                      color: Colors.amber,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.bold)),
-                            ]),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('ብር',
-                            style: TextStyle(
-                                color: Colors.white38, fontSize: 11)),
+                        _statCol('ጠቅላላ ዱቤ', grandCredit, Colors.orangeAccent),
+                        _statCol('የተከፈለ', grandPaid, Colors.green),
+                        _statCol('ቀሪ', grandBalance, Colors.amber, big: true),
                       ],
                     ),
                   ),
@@ -1974,7 +1964,7 @@ class CreditScreen extends StatelessWidget {
                               return Card(
                                 color: const Color(0xFF2A2A2A),
                                 margin: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 4),
+                                    horizontal: 12, vertical: 5),
                                 child: InkWell(
                                   onTap: () => Navigator.push(
                                     context,
@@ -1983,56 +1973,75 @@ class CreditScreen extends StatelessWidget {
                                           customer: c['customer'] as String),
                                     ),
                                   ),
-                                  child: ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundColor: Colors.orange,
-                                      child: Text(
-                                        (c['customer'] as String)
-                                            .substring(0, 1)
-                                            .toUpperCase(),
-                                        style: const TextStyle(
-                                            color: Colors.black,
-                                            fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                    title: Text(c['customer'] as String,
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold)),
-                                    subtitle: Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Row(
-                                        children: [
-                                          _pill(
-                                              'ዱቤ ${credit.toStringAsFixed(0)}',
-                                              Colors.orangeAccent),
-                                          const SizedBox(width: 4),
-                                          _pill(
-                                              'ተከፈለ ${paid.toStringAsFixed(0)}',
-                                              Colors.green),
-                                        ],
-                                      ),
-                                    ),
-                                    trailing: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Row(
                                       children: [
-                                        const Text('ቀሪ',
-                                            style: TextStyle(
-                                                color: Colors.white54,
-                                                fontSize: 10)),
-                                        Text('${balance.toStringAsFixed(0)}',
+                                        CircleAvatar(
+                                          backgroundColor: Colors.orange,
+                                          child: Text(
+                                            (c['customer'] as String)
+                                                .substring(0, 1)
+                                                .toUpperCase(),
                                             style: const TextStyle(
-                                                color: Colors.amber,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 20)),
-                                        const Text('ብር',
-                                            style: TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 10)),
+                                                color: Colors.black,
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(c['customer'] as String,
+                                                  style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                'ዱቤ: ${credit.toStringAsFixed(0)} ብር',
+                                                style: const TextStyle(
+                                                    color: Colors.orangeAccent,
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w600),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'ተከፈለ: ${paid.toStringAsFixed(0)} ብር',
+                                                style: const TextStyle(
+                                                    color: Colors.green,
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w600),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            const Text('ቀሪ',
+                                                style: TextStyle(
+                                                    color: Colors.white54,
+                                                    fontSize: 10)),
+                                            Text(
+                                                '${balance.toStringAsFixed(0)}',
+                                                style: const TextStyle(
+                                                    color: Colors.amber,
+                                                    fontWeight:
+                                                        FontWeight.bold,
+                                                    fontSize: 22)),
+                                            const Text('ብር',
+                                                style: TextStyle(
+                                                    color: Colors.white38,
+                                                    fontSize: 10)),
+                                          ],
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -2050,17 +2059,21 @@ class CreditScreen extends StatelessWidget {
     );
   }
 
-  Widget _pill(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color, width: 1),
-      ),
-      child: Text(text,
-          style: TextStyle(
-              color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+  Widget _statCol(String label, double amount, Color color,
+      {bool big = false}) {
+    return Column(
+      children: [
+        Text(label,
+            style: TextStyle(color: color.withOpacity(0.7), fontSize: 11)),
+        const SizedBox(height: 4),
+        Text('${amount.toStringAsFixed(0)}',
+            style: TextStyle(
+                color: color,
+                fontSize: big ? 26 : 20,
+                fontWeight: FontWeight.bold)),
+        const Text('ብር',
+            style: TextStyle(color: Colors.white38, fontSize: 10)),
+      ],
     );
   }
 }
@@ -2202,7 +2215,12 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
               onPressed: () async {
                 final amount = double.tryParse(amtCtrl.text.trim()) ?? 0;
-                if (amount <= 0) return;
+                if (amount <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('ትክክለኛ ቁጥር ያስገቡ'),
+                      backgroundColor: Colors.orange));
+                  return;
+                }
                 final prefs = await SharedPreferences.getInstance();
                 final waiter =
                     prefs.getString('waiterName') ?? ownerInfo['name']!;
@@ -2216,16 +2234,20 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   'timestamp': timestamp,
                 };
                 try {
-                  final localId =
-                      await DB.savePaymentRow({...payment, 'firestore_id': ''});
-                  try {
-                    final fsId = await Cloud.pushPayment(payment);
-                    if (fsId != null) {
-                      await DB.updatePaymentFirestoreId(localId, fsId);
-                    }
-                  } catch (_) {}
-                } catch (_) {}
-                if (ctx.mounted) Navigator.pop(ctx, true);
+                  final localId = await DB.savePaymentRow(
+                      {...payment, 'firestore_id': ''});
+                  if (ctx.mounted) Navigator.pop(ctx, true);
+                  Future.microtask(() async {
+                    try {
+                      final fsId = await Cloud.pushPayment(payment);
+                      if (fsId != null) {
+                        await DB.updatePaymentFirestoreId(localId, fsId);
+                      }
+                    } catch (_) {}
+                  });
+                } catch (e) {
+                  if (ctx.mounted) Navigator.pop(ctx, false);
+                }
               },
               child: const Text('አስቀምጥ',
                   style: TextStyle(color: Colors.white)),
@@ -2242,6 +2264,27 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     }
   }
 
+  String _payLabel(String key) {
+    for (var p in paymentMethods) {
+      if (p['key'] == key) return p['label'] as String;
+    }
+    return key;
+  }
+
+  IconData _payIcon(String key) {
+    for (var p in paymentMethods) {
+      if (p['key'] == key) return p['icon'] as IconData;
+    }
+    return Icons.payments;
+  }
+
+  Color _payColor(String key) {
+    for (var p in paymentMethods) {
+      if (p['key'] == key) return p['color'] as Color;
+    }
+    return Colors.grey;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2256,20 +2299,16 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: Cloud.allPaymentsStream(),
+            stream: CombinedPayments.stream(),
             builder: (ctxP, snapP) {
               final payments = snapP.data ?? [];
               final mySales = snapS.data!
                   .where((s) =>
                       s['customer'] == customer && (s['is_credit'] ?? 0) == 1)
                   .toList();
-              mySales.sort((a, b) => ((b['timestamp'] ?? '') as String)
-                  .compareTo((a['timestamp'] ?? '') as String));
               final myPayments = payments
                   .where((p) => p['customer'] == customer)
                   .toList();
-              myPayments.sort((a, b) => ((b['timestamp'] ?? '') as String)
-                  .compareTo((a['timestamp'] ?? '') as String));
 
               double credit = 0, paid = 0;
               for (var s in mySales) {
@@ -2297,6 +2336,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   'amount': ((p['amount'] ?? 0) as num).toDouble(),
                   'label': '💰 ክፍያ ተቀበለ',
                   'by': p['waiter'] ?? '',
+                  'payment_method': p['payment_method'] ?? 'cash',
+                  'note': p['note'] ?? '',
                 });
               }
               history.sort((a, b) => (b['timestamp'] as String)
@@ -2357,6 +2398,9 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                               final isPayment = h['kind'] == 'payment';
                               final ts = DateTime.tryParse(
                                   h['timestamp'] as String);
+                              final pm = isPayment
+                                  ? (h['payment_method'] as String? ?? 'cash')
+                                  : '';
                               return Card(
                                 color: const Color(0xFF2A2A2A),
                                 margin: const EdgeInsets.symmetric(
@@ -2375,11 +2419,55 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                   ),
                                   title: Text(h['label'] as String,
                                       style: const TextStyle(
-                                          color: Colors.white, fontSize: 14)),
-                                  subtitle: Text(
-                                    '${h['by']}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
-                                    style: const TextStyle(
-                                        color: Colors.white54, fontSize: 11),
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600)),
+                                  subtitle: Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${h['by']}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
+                                          style: const TextStyle(
+                                              color: Colors.white54,
+                                              fontSize: 11),
+                                        ),
+                                        if (isPayment) ...[
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              Icon(_payIcon(pm),
+                                                  color: _payColor(pm),
+                                                  size: 14),
+                                              const SizedBox(width: 4),
+                                              Text(_payLabel(pm),
+                                                  style: TextStyle(
+                                                      color: _payColor(pm),
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                              if ((h['note'] ?? '')
+                                                  .toString()
+                                                  .isNotEmpty) ...[
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    h['note'] as String,
+                                                    style: const TextStyle(
+                                                        color: Colors.white38,
+                                                        fontSize: 11),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                   ),
                                   trailing: Text(
                                     '${isPayment ? "-" : "+"}${(h['amount'] as double).toStringAsFixed(0)}',
@@ -2388,7 +2476,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                             ? Colors.green
                                             : Colors.orangeAccent,
                                         fontWeight: FontWeight.bold,
-                                        fontSize: 16),
+                                        fontSize: 17),
                                   ),
                                 ),
                               );
@@ -2404,7 +2492,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     );
   }
 
-  Widget _statCol(String label, double amount, Color color, {bool big = false}) {
+  Widget _statCol(String label, double amount, Color color,
+      {bool big = false}) {
     return Column(
       children: [
         Text(label,
@@ -3108,9 +3197,28 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
   }
 
   Future<void> _changeQty(int saleId, int newQty) async {
+    if (newQty <= 0) {
+      await _deleteItem(saleId);
+      return;
+    }
+    final row =
+        items.firstWhere((it) => it['id'] == saleId, orElse: () => {});
+    if (row.isEmpty) return;
+    final sw = row['served_with'] as String? ?? '';
+    final oldQty = row['quantity'] as int? ?? 0;
+    final diff = newQty - oldQty;
+
     await DB.updateSaleQty(saleId, newQty);
     await _load();
     widget.onChanged();
+
+    try {
+      if (sw == 'እንጀራ' && diff != 0) {
+        await Inventory.deduct(diff, 0);
+      } else if (sw == 'ዳቦ' && diff != 0) {
+        await Inventory.deduct(0, diff);
+      }
+    } catch (_) {}
   }
 
   Future<void> _deleteItem(int saleId) async {
@@ -3140,17 +3248,161 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
       if (row.isNotEmpty) {
         final fsId = row.first['firestore_id'] as String?;
         if (fsId != null && fsId.isNotEmpty) {
-          await Cloud.voidSale(fsId);
+          try {
+            await Cloud.voidSale(fsId);
+          } catch (_) {}
         }
         final sw = row.first['served_with'] as String? ?? '';
         final qty = row.first['quantity'] as int? ?? 0;
-        if (sw == 'እንጀራ') {
-          await Inventory.restore(qty, 0);
-        } else if (sw == 'ዳቦ') {
-          await Inventory.restore(0, qty);
-        }
+        try {
+          if (sw == 'እንጀራ') {
+            await Inventory.restore(qty, 0);
+          } else if (sw == 'ዳቦ') {
+            await Inventory.restore(0, qty);
+          }
+        } catch (_) {}
       }
       await DB.deleteSale(saleId);
+      await _load();
+      widget.onChanged();
+    }
+  }
+
+  Future<void> _addNewItem() async {
+    final menu = await DB.getMenu();
+    if (!mounted) return;
+
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        maxChildSize: 0.95,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (ctx2, scrollCtrl) => Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.amber.shade900,
+              child: Row(
+                children: [
+                  const Icon(Icons.add_circle, color: Colors.black),
+                  const SizedBox(width: 8),
+                  const Text('ምግብ ጨምር',
+                      style: TextStyle(
+                          color: Colors.black,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.black),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: menu.length,
+                itemBuilder: (ctx3, i) {
+                  final m = menu[i];
+                  final sw = (m['served_with'] ?? '') as String;
+                  return ListTile(
+                    title: Text(m['name'] as String,
+                        style:
+                            const TextStyle(color: Colors.white)),
+                    subtitle: Row(
+                      children: [
+                        Text(
+                            '${m['category']} • ${(m['price'] as num).toStringAsFixed(0)} ብር',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12)),
+                        if (sw.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: sw == 'እንጀራ'
+                                  ? Colors.amber.shade900.withOpacity(0.4)
+                                  : Colors.brown.withOpacity(0.4),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: Text('በ$sw',
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 10)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    trailing: const Icon(Icons.add_circle,
+                        color: Colors.greenAccent),
+                    onTap: () => Navigator.pop(ctx, m),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (picked == null) return;
+
+    final existing = items.firstWhere(
+      (it) => it['item_name'] == picked['name'],
+      orElse: () => {},
+    );
+
+    if (existing.isNotEmpty) {
+      final newQty = (existing['quantity'] as int) + 1;
+      await _changeQty(existing['id'] as int, newQty);
+    } else {
+      final now = DateTime.now().toIso8601String();
+      final waiter = items.isNotEmpty
+          ? (items.first['waiter'] as String? ?? 'OWNER')
+          : 'OWNER';
+      final isCredit = items.isNotEmpty
+          ? (items.first['is_credit'] as int? ?? 0)
+          : 0;
+      final isPaid =
+          items.isNotEmpty ? (items.first['is_paid'] as int? ?? 1) : 1;
+      final paymentMethod = items.isNotEmpty
+          ? (items.first['payment_method'] as String? ?? 'cash')
+          : 'cash';
+
+      final row = {
+        'item_id': picked['id'],
+        'item_name': picked['name'],
+        'category': picked['category'],
+        'quantity': 1,
+        'unit_price': picked['price'],
+        'total_price': picked['price'],
+        'waiter': waiter,
+        'customer': widget.customer,
+        'served_with': picked['served_with'] ?? '',
+        'is_credit': isCredit,
+        'is_paid': isPaid,
+        'payment_method': paymentMethod,
+        'voided': 0,
+        'timestamp': now,
+      };
+
+      try {
+        final localId = await DB.saveSaleRow({...row, 'firestore_id': ''});
+        final fsId = await Cloud.pushSale(row);
+        if (fsId != null) await DB.updateSaleFirestoreId(localId, fsId);
+        final sw = (picked['served_with'] ?? '') as String;
+        if (sw == 'እንጀራ') {
+          await Inventory.deduct(1, 0);
+        } else if (sw == 'ዳቦ') {
+          await Inventory.deduct(0, 1);
+        }
+      } catch (_) {}
+
       await _load();
       widget.onChanged();
     }
@@ -3166,7 +3418,7 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
     }
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.7,
+      initialChildSize: 0.75,
       maxChildSize: 0.95,
       minChildSize: 0.4,
       expand: false,
@@ -3205,6 +3457,14 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
           if (loading)
             const Expanded(
                 child: Center(child: CircularProgressIndicator()))
+          else if (items.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text('ምንም ዕቃ የለም\nምግብ ለመጨመር ከታች ይጫኑ',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70)),
+              ),
+            )
           else
             Expanded(
               child: ListView.builder(
@@ -3212,6 +3472,7 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                 itemCount: items.length,
                 itemBuilder: (ctx3, i) {
                   final it = items[i];
+                  final sw = (it['served_with'] ?? '') as String;
                   return Card(
                     color: const Color(0xFF2A2A2A),
                     margin: const EdgeInsets.symmetric(
@@ -3220,10 +3481,31 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                       title: Text('${it['item_name']}',
                           style:
                               const TextStyle(color: Colors.white)),
-                      subtitle: Text(
-                          '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12)),
+                      subtitle: Row(
+                        children: [
+                          Text(
+                              '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
+                              style: const TextStyle(
+                                  color: Colors.white54, fontSize: 12)),
+                          if (sw.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: sw == 'እንጀራ'
+                                    ? Colors.amber.shade900.withOpacity(0.4)
+                                    : Colors.brown.withOpacity(0.4),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text('በ$sw',
+                                  style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 10)),
+                            ),
+                          ],
+                        ],
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -3260,6 +3542,23 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                 },
               ),
             ),
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: const Color(0xFF0F0F0F),
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.add_circle, color: Colors.white),
+              label: const Text('ምግብ ጨምር (Add Food)',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                minimumSize: const Size.fromHeight(50),
+              ),
+              onPressed: _addNewItem,
+            ),
+          ),
         ],
       ),
     );
