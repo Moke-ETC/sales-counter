@@ -781,11 +781,13 @@ class CombinedPayments {
     _refresh.add(null);
   }
 
-  static Stream<List<Map<String, dynamic>>> stream() {
+  /// Merged stream of local + cloud payments, refreshing on any change
+  static Stream<List<Map<String, dynamic>>> stream() async* {
     _ensureFirestore();
-    return Stream<void>.value(null)
-        .followedBy(_refresh.stream)
-        .asyncMap((_) => DB.getAllPayments());
+    yield await DB.getAllPayments();
+    await for (final _ in _refresh.stream) {
+      yield await DB.getAllPayments();
+    }
   }
 }
 
@@ -2226,7 +2228,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 try {
                   final localId = await DB.savePaymentRow(
                       {...payment, 'firestore_id': ''});
-                  // 🔔 refresh UI immediately
                   CombinedPayments.notifyLocalChange();
                   if (ctx.mounted) Navigator.pop(ctx, true);
                   Future.microtask(() async {
