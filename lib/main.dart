@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -760,42 +761,31 @@ class Cloud {
   }
 }
 
-// ==================== COMBINED PAYMENTS ====================
+// ==================== COMBINED PAYMENTS (FIXED) ====================
 class CombinedPayments {
-  static String _key(Map<String, dynamic> p) {
-    return '${p['customer']}|${p['amount']}|${p['timestamp']}';
-  }
+  static final _refresh = StreamController<void>.broadcast();
+  static bool _listening = false;
 
-  /// Stream of ALL payments (Firestore + local), merged and deduped.
-  static Stream<List<Map<String, dynamic>>> stream() async* {
-    // Emit local first (fast)
-    yield await DB.getAllPayments();
-
-    // Then merge with Firestore
-    await for (final cloud in _cloudSafe()) {
-      final local = await DB.getAllPayments();
-      final seen = <String>{};
-      final merged = <Map<String, dynamic>>[];
-      for (var p in cloud) {
-        final k = _key(p);
-        if (seen.add(k)) merged.add(p);
-      }
-      for (var p in local) {
-        final k = _key(p);
-        if (seen.add(k)) merged.add(p);
-      }
-      merged.sort((a, b) => ((b['timestamp'] ?? '') as String)
-          .compareTo((a['timestamp'] ?? '') as String));
-      yield merged;
-    }
-  }
-
-  static Stream<List<Map<String, dynamic>>> _cloudSafe() async* {
+  static void _ensureFirestore() {
+    if (_listening) return;
+    _listening = true;
     try {
-      yield* Cloud.allPaymentsStream();
-    } catch (_) {
-      yield [];
-    }
+      Cloud.allPaymentsStream().listen((_) {
+        _refresh.add(null);
+      }, onError: (_) {});
+    } catch (_) {}
+  }
+
+  /// Call this after saving a payment locally to trigger UI refresh
+  static void notifyLocalChange() {
+    _refresh.add(null);
+  }
+
+  static Stream<List<Map<String, dynamic>>> stream() {
+    _ensureFirestore();
+    return Stream<void>.value(null)
+        .followedBy(_refresh.stream)
+        .asyncMap((_) => DB.getAllPayments());
   }
 }
 
@@ -882,7 +872,7 @@ Map<String, Map<String, dynamic>> computeCreditLedger(
   for (var s in sales) {
     if ((s['is_credit'] ?? 0) != 1) continue;
     if ((s['voided'] ?? 0) == 1) continue;
-    final c = (s['customer'] ?? '') as String;
+    final c = ((s['customer'] ?? '') as String).trim();
     if (c.isEmpty) continue;
     map.putIfAbsent(c, () => {
           'customer': c,
@@ -904,7 +894,7 @@ Map<String, Map<String, dynamic>> computeCreditLedger(
   }
 
   for (var p in payments) {
-    final c = (p['customer'] ?? '') as String;
+    final c = ((p['customer'] ?? '') as String).trim();
     if (c.isEmpty) continue;
     map.putIfAbsent(c, () => {
           'customer': c,
@@ -2226,7 +2216,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                     prefs.getString('waiterName') ?? ownerInfo['name']!;
                 final timestamp = DateTime.now().toIso8601String();
                 final payment = {
-                  'customer': customer,
+                  'customer': customer.trim(),
                   'amount': amount,
                   'waiter': waiter,
                   'note': noteCtrl.text.trim(),
@@ -2236,6 +2226,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 try {
                   final localId = await DB.savePaymentRow(
                       {...payment, 'firestore_id': ''});
+                  // 🔔 refresh UI immediately
+                  CombinedPayments.notifyLocalChange();
                   if (ctx.mounted) Navigator.pop(ctx, true);
                   Future.microtask(() async {
                     try {
@@ -2304,10 +2296,14 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
               final payments = snapP.data ?? [];
               final mySales = snapS.data!
                   .where((s) =>
-                      s['customer'] == customer && (s['is_credit'] ?? 0) == 1)
+                      ((s['customer'] ?? '') as String).trim() ==
+                          customer.trim() &&
+                      (s['is_credit'] ?? 0) == 1)
                   .toList();
               final myPayments = payments
-                  .where((p) => p['customer'] == customer)
+                  .where((p) =>
+                      ((p['customer'] ?? '') as String).trim() ==
+                      customer.trim())
                   .toList();
 
               double credit = 0, paid = 0;
