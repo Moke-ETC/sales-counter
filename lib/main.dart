@@ -496,7 +496,7 @@ class DB {
     if (_db != null) return _db!;
     final dbPath = p.join(await getDatabasesPath(), 'meri_shiro.db');
     _db = await openDatabase(dbPath,
-        version: 8, onCreate: _create, onUpgrade: _upgrade);
+        version: 9, onCreate: _create, onUpgrade: _upgrade);
     return _db!;
   }
 
@@ -520,15 +520,6 @@ class DB {
         is_paid INTEGER NOT NULL DEFAULT 1,
         payment_method TEXT NOT NULL DEFAULT 'cash',
         voided INTEGER NOT NULL DEFAULT 0,
-        firestore_id TEXT NOT NULL DEFAULT '',
-        timestamp TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer TEXT NOT NULL, amount REAL NOT NULL,
-        waiter TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
         firestore_id TEXT NOT NULL DEFAULT '',
         timestamp TEXT NOT NULL
       )
@@ -589,19 +580,8 @@ class DB {
       try { await db.execute('ALTER TABLE sales ADD COLUMN voided INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
       try { await db.execute('ALTER TABLE sales ADD COLUMN firestore_id TEXT NOT NULL DEFAULT ""'); } catch (_) {}
     }
-    if (oldV < 8) {
-      try {
-        await db.execute('''
-          CREATE TABLE payments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            customer TEXT NOT NULL, amount REAL NOT NULL,
-            waiter TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
-            firestore_id TEXT NOT NULL DEFAULT '',
-            timestamp TEXT NOT NULL
-          )
-        ''');
-      } catch (_) {}
-    }
+    // oldV 8: payments table (kept for legacy, but no longer used)
+    // oldV 9: no schema change — payments are now stored as sales rows
   }
 
   static Future<List<Map<String, dynamic>>> getMenu() async {
@@ -629,19 +609,9 @@ class DB {
     return db.insert('sales', row);
   }
 
-  static Future<int> savePaymentRow(Map<String, dynamic> row) async {
-    final db = await database;
-    return db.insert('payments', row);
-  }
-
   static Future<void> updateSaleFirestoreId(int id, String fsId) async {
     final db = await database;
     await db.update('sales', {'firestore_id': fsId}, where: 'id = ?', whereArgs: [id]);
-  }
-
-  static Future<void> updatePaymentFirestoreId(int id, String fsId) async {
-    final db = await database;
-    await db.update('payments', {'firestore_id': fsId}, where: 'id = ?', whereArgs: [id]);
   }
 
   static Future<void> updateSaleQty(int saleId, int qty) async {
@@ -664,12 +634,9 @@ class DB {
 
   static Future<List<Map<String, dynamic>>> getAllSales() async {
     final db = await database;
-    return db.query('sales', where: 'voided = 0', orderBy: 'timestamp DESC');
-  }
-
-  static Future<List<Map<String, dynamic>>> getAllPayments() async {
-    final db = await database;
-    return db.query('payments', orderBy: 'timestamp DESC');
+    return db.query('sales',
+        where: 'voided = 0 AND category != "payment"',
+        orderBy: 'timestamp DESC');
   }
 
   static Future<List<Map<String, dynamic>>> getOrdersToday() async {
@@ -682,7 +649,7 @@ class DB {
              SUM(total_price) as total_revenue,
              MIN(is_paid) as all_paid, MIN(is_credit) as is_credit,
              MAX(timestamp) as last_time
-      FROM sales WHERE customer != '' AND voided = 0
+      FROM sales WHERE customer != '' AND voided = 0 AND category != 'payment'
         AND timestamp BETWEEN ? AND ?
       GROUP BY customer ORDER BY last_time DESC
     ''', [start, end]);
@@ -694,7 +661,7 @@ class DB {
     final start = DateTime(now.year, now.month, now.day).toIso8601String();
     final end = DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
     return db.query('sales',
-        where: 'customer = ? AND voided = 0 AND timestamp BETWEEN ? AND ?',
+        where: 'customer = ? AND voided = 0 AND category != "payment" AND timestamp BETWEEN ? AND ?',
         whereArgs: [customer, start, end],
         orderBy: 'timestamp DESC');
   }
@@ -707,18 +674,6 @@ class Cloud {
   static Future<String?> pushSale(Map<String, dynamic> row) async {
     try {
       final ref = await _db.collection('sales').add({
-        ...row,
-        'serverTime': FieldValue.serverTimestamp(),
-      }).timeout(const Duration(seconds: 5));
-      return ref.id;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  static Future<String?> pushPayment(Map<String, dynamic> row) async {
-    try {
-      final ref = await _db.collection('payments').add({
         ...row,
         'serverTime': FieldValue.serverTimestamp(),
       }).timeout(const Duration(seconds: 5));
@@ -745,72 +700,16 @@ class Cloud {
   static Stream<List<Map<String, dynamic>>> waiterSalesStream(String waiter) {
     return _db.collection('sales').snapshots().map((snap) => snap.docs
         .map((d) => {...d.data(), 'id': d.id})
-        .where((s) => s['waiter'] == waiter && (s['voided'] ?? 0) != 1)
+        .where((s) =>
+            s['waiter'] == waiter &&
+            (s['voided'] ?? 0) != 1 &&
+            (s['category'] ?? '') != 'payment')
         .toList());
   }
 
   static Stream<List<Map<String, dynamic>>> waitersStream() {
     return _db.collection('waiters').snapshots().map(
         (snap) => snap.docs.map((d) => d.data()).toList());
-  }
-
-  static Stream<List<Map<String, dynamic>>> allPaymentsStream() {
-    return _db.collection('payments').snapshots().map((snap) => snap.docs
-        .map((d) => {...d.data(), 'id': d.id})
-        .toList());
-  }
-}
-
-// ==================== PAYMENTS STORE (PERSISTENT) ====================
-class PaymentsStore {
-  static final _controller =
-      StreamController<List<Map<String, dynamic>>>.broadcast();
-  static bool _firestoreListening = false;
-
-  static void _initFirestore() {
-    if (_firestoreListening) return;
-    _firestoreListening = true;
-    try {
-      Cloud.allPaymentsStream().listen((cloudPayments) async {
-        final local = await DB.getAllPayments();
-        if (!_controller.isClosed) {
-          _controller.add(_merge(cloudPayments, local));
-        }
-      }, onError: (_) {});
-    } catch (_) {}
-  }
-
-  static Stream<List<Map<String, dynamic>>> stream() {
-    _initFirestore();
-    // Emit fresh local data on next microtask
-    Future.microtask(() async {
-      final local = await DB.getAllPayments();
-      if (!_controller.isClosed) _controller.add(local);
-    });
-    return _controller.stream;
-  }
-
-  /// Call this after saving a payment — forces all listeners to refresh
-  static Future<void> refresh() async {
-    final local = await DB.getAllPayments();
-    if (!_controller.isClosed) _controller.add(local);
-  }
-
-  static List<Map<String, dynamic>> _merge(
-      List<Map<String, dynamic>> a, List<Map<String, dynamic>> b) {
-    final seen = <String>{};
-    final out = <Map<String, dynamic>>[];
-    for (var p in a) {
-      final k =
-          '${(p['customer'] ?? '').toString().trim()}|${p['amount']}|${p['timestamp']}';
-      if (seen.add(k)) out.add(p);
-    }
-    for (var p in b) {
-      final k =
-          '${(p['customer'] ?? '').toString().trim()}|${p['amount']}|${p['timestamp']}';
-      if (seen.add(k)) out.add(p);
-    }
-    return out;
   }
 }
 
@@ -888,17 +787,28 @@ class Inventory {
   }
 }
 
-// ==================== HELPERS ====================
+// ==================== CREDIT LEDGER ====================
+/// Payment rows are stored in the `sales` collection with:
+///   category == 'payment'
+///   total_price == -amount  (negative)
+///   item_name == '💰 ክፍያ...'
+/// This way they sync using the SAME Firestore collection as sales.
 Map<String, Map<String, dynamic>> computeCreditLedger(
-    List<Map<String, dynamic>> sales,
-    List<Map<String, dynamic>> payments) {
+    List<Map<String, dynamic>> rows) {
   final map = <String, Map<String, dynamic>>{};
 
-  for (var s in sales) {
-    if ((s['is_credit'] ?? 0) != 1) continue;
+  for (var s in rows) {
     if ((s['voided'] ?? 0) == 1) continue;
     final c = ((s['customer'] ?? '') as String).trim();
     if (c.isEmpty) continue;
+
+    final cat = (s['category'] ?? '') as String;
+    final isPayment = cat == 'payment';
+    final amt = ((s['total_price'] ?? 0) as num).toDouble();
+
+    // Skip normal non-credit sales
+    if (!isPayment && (s['is_credit'] ?? 0) != 1) continue;
+
     map.putIfAbsent(c, () => {
           'customer': c,
           'credit': 0.0,
@@ -908,30 +818,21 @@ Map<String, Map<String, dynamic>> computeCreditLedger(
           'qty': 0,
           'last_time': '',
         });
-    map[c]!['credit'] =
-        (map[c]!['credit'] as double) + ((s['total_price'] ?? 0) as num).toDouble();
-    map[c]!['order_count'] = (map[c]!['order_count'] as int) + 1;
-    map[c]!['qty'] = (map[c]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
+
+    if (isPayment) {
+      map[c]!['paid'] = (map[c]!['paid'] as double) + amt.abs();
+    } else {
+      map[c]!['credit'] =
+          (map[c]!['credit'] as double) + amt;
+      map[c]!['order_count'] = (map[c]!['order_count'] as int) + 1;
+      map[c]!['qty'] =
+          (map[c]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
+    }
+
     final ts = (s['timestamp'] ?? '') as String;
     if (ts.compareTo(map[c]!['last_time'] as String) > 0) {
       map[c]!['last_time'] = ts;
     }
-  }
-
-  for (var p in payments) {
-    final c = ((p['customer'] ?? '') as String).trim();
-    if (c.isEmpty) continue;
-    map.putIfAbsent(c, () => {
-          'customer': c,
-          'credit': 0.0,
-          'paid': 0.0,
-          'balance': 0.0,
-          'order_count': 0,
-          'qty': 0,
-          'last_time': '',
-        });
-    map[c]!['paid'] =
-        (map[c]!['paid'] as double) + ((p['amount'] ?? 0) as num).toDouble();
   }
 
   for (var c in map.keys) {
@@ -1695,6 +1596,7 @@ class _OwnerScreenState extends State<OwnerScreen> {
                 final todayStart = DateTime(now.year, now.month, now.day);
                 final all = snap.data!;
                 final sales = all.where((s) {
+                  if ((s['category'] ?? '') == 'payment') return false;
                   final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
                   return ts != null && ts.isAfter(todayStart);
                 }).toList();
@@ -1930,144 +1832,139 @@ class CreditScreen extends StatelessWidget {
               child: CircularProgressIndicator(color: Colors.amber),
             );
           }
-          return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: PaymentsStore.stream(),
-            builder: (ctxP, snapP) {
-              final payments = snapP.data ?? [];
-              final ledger = computeCreditLedger(snapS.data!, payments);
-              final list = ledger.values
-                  .where((c) => (c['balance'] as double) > 0.01)
-                  .toList();
-              list.sort((a, b) => (b['last_time'] as String)
-                  .compareTo(a['last_time'] as String));
+          final rows = snapS.data!;
+          final ledger = computeCreditLedger(rows);
+          final list = ledger.values
+              .where((c) => (c['balance'] as double) > 0.01)
+              .toList();
+          list.sort((a, b) => (b['last_time'] as String)
+              .compareTo(a['last_time'] as String));
 
-              double grandCredit = 0, grandPaid = 0, grandBalance = 0;
-              for (var c in ledger.values) {
-                grandCredit += (c['credit'] as double);
-                grandPaid += (c['paid'] as double);
-                grandBalance += (c['balance'] as double);
-              }
+          double grandCredit = 0, grandPaid = 0, grandBalance = 0;
+          for (var c in ledger.values) {
+            grandCredit += (c['credit'] as double);
+            grandPaid += (c['paid'] as double);
+            grandBalance += (c['balance'] as double);
+          }
 
-              return Column(
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    color: Colors.orange.shade900.withOpacity(0.4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _statCol('ጠቅላላ ዱቤ', grandCredit, Colors.orangeAccent),
-                        _statCol('የተከፈለ', grandPaid, Colors.green),
-                        _statCol('ቀሪ', grandBalance, Colors.amber, big: true),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: list.isEmpty
-                        ? const Center(
-                            child: Text('ምንም ዱቤ የለም ✅',
-                                style: TextStyle(
-                                    color: Colors.white70, fontSize: 18)))
-                        : ListView.builder(
-                            itemCount: list.length,
-                            itemBuilder: (ctx, i) {
-                              final c = list[i];
-                              final balance = c['balance'] as double;
-                              final credit = c['credit'] as double;
-                              final paid = c['paid'] as double;
-                              return Card(
-                                color: const Color(0xFF2A2A2A),
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 5),
-                                child: InkWell(
-                                  onTap: () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => CustomerLedgerScreen(
-                                          customer: c['customer'] as String),
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                color: Colors.orange.shade900.withOpacity(0.4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _statCol('ጠቅላላ ዱቤ', grandCredit, Colors.orangeAccent),
+                    _statCol('የተከፈለ', grandPaid, Colors.green),
+                    _statCol('ቀሪ', grandBalance, Colors.amber, big: true),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: list.isEmpty
+                    ? const Center(
+                        child: Text('ምንም ዱቤ የለም ✅',
+                            style: TextStyle(
+                                color: Colors.white70, fontSize: 18)))
+                    : ListView.builder(
+                        itemCount: list.length,
+                        itemBuilder: (ctx, i) {
+                          final c = list[i];
+                          final balance = c['balance'] as double;
+                          final credit = c['credit'] as double;
+                          final paid = c['paid'] as double;
+                          return Card(
+                            color: const Color(0xFF2A2A2A),
+                            margin: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 5),
+                            child: InkWell(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CustomerLedgerScreen(
+                                      customer: c['customer'] as String),
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundColor: Colors.orange,
+                                      child: Text(
+                                        (c['customer'] as String)
+                                            .substring(0, 1)
+                                            .toUpperCase(),
+                                        style: const TextStyle(
+                                            color: Colors.black,
+                                            fontWeight: FontWeight.bold),
+                                      ),
                                     ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Row(
-                                      children: [
-                                        CircleAvatar(
-                                          backgroundColor: Colors.orange,
-                                          child: Text(
-                                            (c['customer'] as String)
-                                                .substring(0, 1)
-                                                .toUpperCase(),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(c['customer'] as String,
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 16,
+                                                  fontWeight:
+                                                      FontWeight.bold)),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'ዱቤ: ${credit.toStringAsFixed(0)} ብር',
                                             style: const TextStyle(
-                                                color: Colors.black,
-                                                fontWeight: FontWeight.bold),
+                                                color: Colors.orangeAccent,
+                                                fontSize: 13,
+                                                fontWeight:
+                                                    FontWeight.w600),
                                           ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(c['customer'] as String,
-                                                  style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.bold)),
-                                              const SizedBox(height: 6),
-                                              Text(
-                                                'ዱቤ: ${credit.toStringAsFixed(0)} ብር',
-                                                style: const TextStyle(
-                                                    color: Colors.orangeAccent,
-                                                    fontSize: 13,
-                                                    fontWeight:
-                                                        FontWeight.w600),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                'ተከፈለ: ${paid.toStringAsFixed(0)} ብር',
-                                                style: const TextStyle(
-                                                    color: Colors.green,
-                                                    fontSize: 13,
-                                                    fontWeight:
-                                                        FontWeight.w600),
-                                              ),
-                                            ],
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'ተከፈለ: ${paid.toStringAsFixed(0)} ብር',
+                                            style: const TextStyle(
+                                                color: Colors.green,
+                                                fontSize: 13,
+                                                fontWeight:
+                                                    FontWeight.w600),
                                           ),
-                                        ),
-                                        Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          children: [
-                                            const Text('ቀሪ',
-                                                style: TextStyle(
-                                                    color: Colors.white54,
-                                                    fontSize: 10)),
-                                            Text(
-                                                '${balance.toStringAsFixed(0)}',
-                                                style: const TextStyle(
-                                                    color: Colors.amber,
-                                                    fontWeight:
-                                                        FontWeight.bold,
-                                                    fontSize: 22)),
-                                            const Text('ብር',
-                                                style: TextStyle(
-                                                    color: Colors.white38,
-                                                    fontSize: 10)),
-                                          ],
-                                        ),
+                                        ],
+                                      ),
+                                    ),
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        const Text('ቀሪ',
+                                            style: TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 10)),
+                                        Text(
+                                            '${balance.toStringAsFixed(0)}',
+                                            style: const TextStyle(
+                                                color: Colors.amber,
+                                                fontWeight:
+                                                    FontWeight.bold,
+                                                fontSize: 22)),
+                                        const Text('ብር',
+                                            style: TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 10)),
                                       ],
                                     ),
-                                  ),
+                                  ],
                                 ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              );
-            },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           );
         },
       ),
@@ -2240,24 +2137,35 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 final waiter =
                     prefs.getString('waiterName') ?? ownerInfo['name']!;
                 final timestamp = DateTime.now().toIso8601String();
-                final payment = {
-                  'customer': customer.trim(),
-                  'amount': amount,
+                final note = noteCtrl.text.trim();
+                // Save payment as a special "sale" row (category='payment', negative total)
+                final row = {
+                  'item_id': -1,
+                  'item_name': note.isNotEmpty
+                      ? '💰 ክፍያ — $note'
+                      : '💰 ክፍያ ተቀበለ',
+                  'category': 'payment',
+                  'quantity': 1,
+                  'unit_price': -amount,
+                  'total_price': -amount,
                   'waiter': waiter,
-                  'note': noteCtrl.text.trim(),
+                  'customer': customer.trim(),
+                  'served_with': '',
+                  'is_credit': 0,
+                  'is_paid': 1,
                   'payment_method': payMethod,
+                  'voided': 0,
                   'timestamp': timestamp,
                 };
                 try {
-                  final localId = await DB.savePaymentRow(
-                      {...payment, 'firestore_id': ''});
-                  await PaymentsStore.refresh();
+                  final localId =
+                      await DB.saveSaleRow({...row, 'firestore_id': ''});
                   if (ctx.mounted) Navigator.pop(ctx, true);
                   Future.microtask(() async {
                     try {
-                      final fsId = await Cloud.pushPayment(payment);
+                      final fsId = await Cloud.pushSale(row);
                       if (fsId != null) {
-                        await DB.updatePaymentFirestoreId(localId, fsId);
+                        await DB.updateSaleFirestoreId(localId, fsId);
                       }
                     } catch (_) {}
                   });
@@ -2311,201 +2219,174 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: Cloud.allSalesStream(),
         builder: (ctxS, snapS) {
+          if (snapS.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text('ስህተት: ${snapS.error}',
+                    style: const TextStyle(color: Colors.red)),
+              ),
+            );
+          }
           if (!snapS.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: PaymentsStore.stream(),
-            builder: (ctxP, snapP) {
-              final payments = snapP.data ?? [];
-              final mySales = snapS.data!
-                  .where((s) =>
-                      ((s['customer'] ?? '') as String).trim() ==
-                          customer.trim() &&
-                      (s['is_credit'] ?? 0) == 1)
-                  .toList();
-              final myPayments = payments
-                  .where((p) =>
-                      ((p['customer'] ?? '') as String).trim() ==
-                      customer.trim())
-                  .toList();
+          final all = snapS.data!
+              .where((s) =>
+                  ((s['customer'] ?? '') as String).trim() ==
+                  customer.trim())
+              .toList();
 
-              double credit = 0, paid = 0;
-              for (var s in mySales) {
-                credit += ((s['total_price'] ?? 0) as num).toDouble();
-              }
-              for (var p in myPayments) {
-                paid += ((p['amount'] ?? 0) as num).toDouble();
-              }
-              final balance = credit - paid;
+          double credit = 0, paid = 0;
+          for (var s in all) {
+            final cat = (s['category'] ?? '') as String;
+            final amt = ((s['total_price'] ?? 0) as num).toDouble();
+            if (cat == 'payment') {
+              paid += amt.abs();
+            } else if ((s['is_credit'] ?? 0) == 1) {
+              credit += amt;
+            }
+          }
+          final balance = credit - paid;
 
-              final history = <Map<String, dynamic>>[];
-              for (var s in mySales) {
-                history.add({
-                  'kind': 'sale',
-                  'timestamp': s['timestamp'] ?? '',
-                  'amount': ((s['total_price'] ?? 0) as num).toDouble(),
-                  'label': '${s['item_name']} × ${s['quantity']}',
-                  'by': s['waiter'] ?? '',
-                });
-              }
-              for (var p in myPayments) {
-                history.add({
-                  'kind': 'payment',
-                  'timestamp': p['timestamp'] ?? '',
-                  'amount': ((p['amount'] ?? 0) as num).toDouble(),
-                  'label': '💰 ክፍያ ተቀበለ',
-                  'by': p['waiter'] ?? '',
-                  'payment_method': p['payment_method'] ?? 'cash',
-                  'note': p['note'] ?? '',
-                });
-              }
-              history.sort((a, b) => (b['timestamp'] as String)
-                  .compareTo(a['timestamp'] as String));
+          // Build history (credit sales + payment rows)
+          final history = <Map<String, dynamic>>[];
+          for (var s in all) {
+            final cat = (s['category'] ?? '') as String;
+            final isPayment = cat == 'payment';
+            if (!isPayment && (s['is_credit'] ?? 0) != 1) continue;
+            history.add({
+              'kind': isPayment ? 'payment' : 'sale',
+              'timestamp': s['timestamp'] ?? '',
+              'amount': ((s['total_price'] ?? 0) as num).toDouble().abs(),
+              'label': isPayment
+                  ? (s['item_name'] ?? '💰 ክፍያ')
+                  : '${s['item_name']} × ${s['quantity']}',
+              'by': s['waiter'] ?? '',
+              'payment_method': s['payment_method'] ?? 'cash',
+            });
+          }
+          history.sort((a, b) => (b['timestamp'] as String)
+              .compareTo(a['timestamp'] as String));
 
-              return Column(
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    color: const Color(0xFF1F1F1F),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _statCol('ጠቅላላ ዱቤ', credit, Colors.orangeAccent),
-                        _statCol('የተከፈለ', paid, Colors.green),
-                        _statCol('ቀሪ', balance, Colors.amber, big: true),
-                      ],
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                color: const Color(0xFF1F1F1F),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _statCol('ጠቅላላ ዱቤ', credit, Colors.orangeAccent),
+                    _statCol('የተከፈለ', paid, Colors.green),
+                    _statCol('ቀሪ', balance, Colors.amber, big: true),
+                  ],
+                ),
+              ),
+              if (balance > 0.01)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.payments, color: Colors.white),
+                    label: const Text('💰 ክፍያ መዝግብ',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      minimumSize: const Size.fromHeight(50),
                     ),
+                    onPressed: () => _showPaymentDialog(balance),
                   ),
-                  if (balance > 0.01)
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.payments, color: Colors.white),
-                        label: const Text('💰 ክፍያ መዝግብ',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          minimumSize: const Size.fromHeight(50),
-                        ),
-                        onPressed: () => _showPaymentDialog(balance),
-                      ),
-                    ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('ታሪክ:',
-                          style: TextStyle(
-                              color: Colors.amber,
-                              fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  Expanded(
-                    child: history.isEmpty
-                        ? const Center(
-                            child: Text('ምንም ታሪክ የለም',
-                                style: TextStyle(color: Colors.white70)))
-                        : ListView.builder(
-                            itemCount: history.length,
-                            itemBuilder: (ctx, i) {
-                              final h = history[i];
-                              final isSale = h['kind'] == 'sale';
-                              final isPayment = h['kind'] == 'payment';
-                              final ts = DateTime.tryParse(
-                                  h['timestamp'] as String);
-                              final pm = isPayment
-                                  ? (h['payment_method'] as String? ?? 'cash')
-                                  : '';
-                              return Card(
-                                color: const Color(0xFF2A2A2A),
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 3),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: isSale
-                                        ? Colors.orange.shade900
-                                        : Colors.green.shade900,
-                                    child: Icon(
-                                        isSale
-                                            ? Icons.shopping_bag
-                                            : Icons.payments,
-                                        color: Colors.white,
-                                        size: 20),
-                                  ),
-                                  title: Text(h['label'] as String,
+                ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('ታሪክ:',
+                      style: TextStyle(
+                          color: Colors.amber,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ),
+              Expanded(
+                child: history.isEmpty
+                    ? const Center(
+                        child: Text('ምንም ታሪክ የለም',
+                            style: TextStyle(color: Colors.white70)))
+                    : ListView.builder(
+                        itemCount: history.length,
+                        itemBuilder: (ctx, i) {
+                          final h = history[i];
+                          final isPayment = h['kind'] == 'payment';
+                          final ts = DateTime.tryParse(
+                              h['timestamp'] as String);
+                          final pm =
+                              h['payment_method'] as String? ?? 'cash';
+                          return Card(
+                            color: const Color(0xFF2A2A2A),
+                            margin: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 3),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: isPayment
+                                    ? Colors.green.shade900
+                                    : Colors.orange.shade900,
+                                child: Icon(
+                                    isPayment
+                                        ? Icons.payments
+                                        : Icons.shopping_bag,
+                                    color: Colors.white,
+                                    size: 20),
+                              ),
+                              title: Text(h['label'] as String,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      '${h['by']}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
                                       style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600)),
-                                  subtitle: Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '${h['by']}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
-                                          style: const TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 11),
-                                        ),
-                                        if (isPayment) ...[
-                                          const SizedBox(height: 4),
-                                          Row(
-                                            children: [
-                                              Icon(_payIcon(pm),
-                                                  color: _payColor(pm),
-                                                  size: 14),
-                                              const SizedBox(width: 4),
-                                              Text(_payLabel(pm),
-                                                  style: TextStyle(
-                                                      color: _payColor(pm),
-                                                      fontSize: 11,
-                                                      fontWeight:
-                                                          FontWeight.bold)),
-                                              if ((h['note'] ?? '')
-                                                  .toString()
-                                                  .isNotEmpty) ...[
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(
-                                                    h['note'] as String,
-                                                    style: const TextStyle(
-                                                        color: Colors.white38,
-                                                        fontSize: 11),
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                        ],
-                                      ],
+                                          color: Colors.white54,
+                                          fontSize: 11),
                                     ),
-                                  ),
-                                  trailing: Text(
-                                    '${isPayment ? "-" : "+"}${(h['amount'] as double).toStringAsFixed(0)}',
-                                    style: TextStyle(
-                                        color: isPayment
-                                            ? Colors.green
-                                            : Colors.orangeAccent,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 17),
-                                  ),
+                                    if (isPayment) ...[
+                                      const SizedBox(width: 8),
+                                      Icon(_payIcon(pm),
+                                          color: _payColor(pm),
+                                          size: 14),
+                                      const SizedBox(width: 4),
+                                      Text(_payLabel(pm),
+                                          style: TextStyle(
+                                              color: _payColor(pm),
+                                              fontSize: 11,
+                                              fontWeight:
+                                                  FontWeight.bold)),
+                                    ],
+                                  ],
                                 ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              );
-            },
+                              ),
+                              trailing: Text(
+                                '${isPayment ? "-" : "+"}${(h['amount'] as double).toStringAsFixed(0)}',
+                                style: TextStyle(
+                                    color: isPayment
+                                        ? Colors.green
+                                        : Colors.orangeAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 17),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           );
         },
       ),
@@ -2998,6 +2879,7 @@ class WeeklyReportScreen extends StatelessWidget {
           final start = DateTime(now.year, now.month, now.day)
               .subtract(const Duration(days: 6));
           final sales = snap.data!.where((s) {
+            if ((s['category'] ?? '') == 'payment') return false;
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
             return ts != null && ts.isAfter(start);
           }).toList();
