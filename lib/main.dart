@@ -52,7 +52,8 @@ const Map<String, String> ownerInfo = {
   'phone': '0904180455',
 };
 
-const String defaultPin = '1234';
+// 🔒 PIN CHANGED TO 9945
+const String defaultPin = '9945';
 
 const List<Map<String, dynamic>> paymentMethods = [
   {'key': 'cash', 'label': 'ጥሬ ገንዘብ', 'short': 'ጥሬ', 'icon': Icons.payments, 'color': Colors.green},
@@ -163,7 +164,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-// ==================== PIN ====================
+// ==================== PIN (HIDDEN DOTS) ====================
 class PinScreen extends StatefulWidget {
   final String next;
   const PinScreen({super.key, required this.next});
@@ -212,20 +213,37 @@ class _PinScreenState extends State<PinScreen> {
                     fontSize: 24,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text('Default: 1234',
+            const Text('የባለቤት ፒን',
                 style: TextStyle(color: Colors.white54, fontSize: 12)),
             const SizedBox(height: 30),
+            // 🔒 HIDDEN DOTS — no amber fill, only outline + small inner dot
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(4, (i) {
+                final filled = i < input.length;
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 8),
-                  width: 20,
-                  height: 20,
+                  width: 22,
+                  height: 22,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: i < input.length ? Colors.amber : Colors.white24,
+                    color: Colors.transparent,
+                    border: Border.all(
+                      color: filled ? Colors.amber : Colors.white24,
+                      width: 2,
+                    ),
                   ),
+                  child: filled
+                      ? Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.amber,
+                          ),
+                        )
+                      : null,
                 );
               }),
             ),
@@ -665,19 +683,25 @@ class DB {
         orderBy: 'timestamp DESC');
   }
 
+  /// Returns ALL today's transactions grouped by customer (both paid & credit)
   static Future<List<Map<String, dynamic>>> getOrdersToday() async {
     final db = await database;
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day).toIso8601String();
     final end = DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
     return db.rawQuery('''
-      SELECT customer, SUM(quantity) as total_qty,
+      SELECT customer,
+             SUM(quantity) as total_qty,
              SUM(total_price) as total_revenue,
-             MIN(is_paid) as all_paid, MIN(is_credit) as is_credit,
+             MAX(is_credit) as is_credit,
              MAX(timestamp) as last_time
-      FROM sales WHERE customer != '' AND voided = 0 AND category != 'payment'
+      FROM sales
+      WHERE customer != ''
+        AND voided = 0
+        AND category != 'payment'
         AND timestamp BETWEEN ? AND ?
-      GROUP BY customer ORDER BY last_time DESC
+      GROUP BY customer
+      ORDER BY last_time DESC
     ''', [start, end]);
   }
 
@@ -2233,7 +2257,7 @@ class NotificationsScreen extends StatelessWidget {
   }
 }
 
-// ==================== CREDIT SCREEN ====================
+// ==================== CREDIT SCREEN (keep as-is + hide when no credit) ====================
 class CreditScreen extends StatelessWidget {
   const CreditScreen({super.key});
 
@@ -2280,19 +2304,21 @@ class CreditScreen extends StatelessWidget {
 
           return Column(
             children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                color: Colors.orange.shade900.withOpacity(0.4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _statCol('ጠቅላላ ዱቤ', grandCredit, Colors.orangeAccent),
-                    _statCol('የተከፈለ', grandPaid, Colors.green),
-                    _statCol('ቀሪ', grandBalance, Colors.amber, big: true),
-                  ],
+              // ✅ Edit 5 — hide header when there is no credit at all
+              if (grandCredit > 0.01)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  color: Colors.orange.shade900.withOpacity(0.4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _statCol('ጠቅላላ ዱቤ', grandCredit, Colors.orangeAccent),
+                      _statCol('የተከፈለ', grandPaid, Colors.green),
+                      _statCol('ቀሪ', grandBalance, Colors.amber, big: true),
+                    ],
+                  ),
                 ),
-              ),
               Expanded(
                 child: list.isEmpty
                     ? const Center(
@@ -3402,6 +3428,7 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> {
   List<Map<String, dynamic>> orders = [];
   bool loading = true;
+  Set<String> paidSaleIds = {};
 
   @override
   void initState() {
@@ -3412,6 +3439,18 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Future<void> _load() async {
     setState(() => loading = true);
     orders = await DB.getOrdersToday();
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sales')
+          .get()
+          .timeout(const Duration(seconds: 5));
+      final allRemote =
+          snap.docs.map((d) => {...d.data(), 'id': d.id}).toList();
+      final statusData = computeCreditAndPaidStatus(allRemote);
+      paidSaleIds = (statusData['paidSaleIds'] as Set).cast<String>();
+    } catch (_) {}
+
     setState(() => loading = false);
   }
 
@@ -3420,8 +3459,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
       context: context,
       backgroundColor: const Color(0xFF1A1A1A),
       isScrollControlled: true,
-      builder: (ctx) =>
-          _CustomerEditorSheet(customer: customer, onChanged: _load),
+      builder: (ctx) => _CustomerEditorSheet(
+        customer: customer,
+        onChanged: _load,
+        paidSaleIds: paidSaleIds,
+      ),
     );
     _load();
   }
@@ -3440,63 +3482,117 @@ class _OrdersScreenState extends State<OrdersScreen> {
           ? const Center(child: CircularProgressIndicator())
           : orders.isEmpty
               ? const Center(
-                  child: Text('ዛሬ ምንም የደንበኛ ትዕዛዝ የለም',
+                  child: Text('ዛሬ ምንም ትዕዛዝ የለም',
                       style: TextStyle(color: Colors.white70)))
               : ListView.builder(
                   itemCount: orders.length,
                   itemBuilder: (ctx, i) {
                     final o = orders[i];
-                    final isCredit = (o['is_credit'] ?? 0) == 1 &&
-                        (o['all_paid'] ?? 1) == 0;
-                    return Card(
-                      color: const Color(0xFF2A2A2A),
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                      child: ListTile(
-                        onTap: () =>
-                            _showDetails(o['customer'] as String),
-                        leading: CircleAvatar(
-                          backgroundColor: isCredit
-                              ? Colors.orange
-                              : Colors.amber.shade900,
-                          child: Text(
-                              (o['customer'] as String)
-                                  .substring(0, 1)
-                                  .toUpperCase(),
-                              style: const TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold)),
-                        ),
-                        title: Text(o['customer'] as String,
-                            style: const TextStyle(
+                    final customer = (o['customer'] as String);
+                    final qty = (o['total_qty'] ?? 0) as int;
+                    final revenue =
+                        ((o['total_revenue'] ?? 0) as num).toDouble();
+
+                    // Check if all this customer's today sales are paid
+                    final isCreditGroup = (o['is_credit'] ?? 0) == 1;
+                    // A sale is paid if its ID is in paidSaleIds
+                    // For the group summary, we don't have individual IDs,
+                    // so we check if balance for this customer is 0
+                    return FutureBuilder<bool>(
+                      future: _isCustomerPaid(customer),
+                      builder: (ctx2, snap) {
+                        final allPaid = snap.data ?? false;
+                        final wasCreditPaid = isCreditGroup && allPaid;
+                        return Card(
+                          color: const Color(0xFF2A2A2A),
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          child: ListTile(
+                            onTap: () => _showDetails(customer),
+                            leading: CircleAvatar(
+                              backgroundColor: wasCreditPaid
+                                  ? Colors.green.shade700
+                                  : (isCreditGroup
+                                      ? Colors.orange
+                                      : Colors.amber.shade900),
+                              child: Icon(
+                                wasCreditPaid
+                                    ? Icons.check
+                                    : (isCreditGroup
+                                        ? Icons.credit_card
+                                        : Icons.person),
                                 color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold)),
-                        subtitle: Text(
-                            '${o['total_qty']} ዕቃ${isCredit ? " • ዱቤ" : ""}',
-                            style: TextStyle(
-                                color: isCredit
-                                    ? Colors.orange
-                                    : Colors.white60)),
-                        trailing: Text(
-                            '${(o['total_revenue'] as num).toStringAsFixed(0)} ብር',
-                            style: const TextStyle(
-                                color: Colors.amber,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16)),
-                      ),
+                                size: 20,
+                              ),
+                            ),
+                            title: Text(customer,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold)),
+                            subtitle: Text(
+                              '$qty ዕቃ${isCreditGroup ? " • ዱቤ" : ""}',
+                              style: TextStyle(
+                                  color: isCreditGroup
+                                      ? Colors.orange
+                                      : Colors.white60,
+                                  fontSize: 12),
+                            ),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('${revenue.toStringAsFixed(0)} ብር',
+                                    style: const TextStyle(
+                                        color: Colors.amber,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16)),
+                                const SizedBox(height: 2),
+                                if (wasCreditPaid)
+                                  paidBadge('cash')
+                                else if (isCreditGroup)
+                                  creditBadge()
+                                else
+                                  paymentBadge('cash'),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
     );
+  }
+
+  Future<bool> _isCustomerPaid(String customer) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sales')
+          .get()
+          .timeout(const Duration(seconds: 3));
+      final all = snap.docs.map((d) => {...d.data(), 'id': d.id}).toList();
+      final statusData = computeCreditAndPaidStatus(all);
+      final ledger =
+          (statusData['ledger'] as Map).cast<String, Map<String, dynamic>>();
+      final entry = ledger[customer];
+      if (entry == null) return false;
+      return (entry['balance'] as double) <= 0.01;
+    } catch (_) {
+      return false;
+    }
   }
 }
 
 class _CustomerEditorSheet extends StatefulWidget {
   final String customer;
   final VoidCallback onChanged;
-  const _CustomerEditorSheet(
-      {required this.customer, required this.onChanged});
+  final Set<String> paidSaleIds;
+  const _CustomerEditorSheet({
+    required this.customer,
+    required this.onChanged,
+    required this.paidSaleIds,
+  });
   @override
   State<_CustomerEditorSheet> createState() => _CustomerEditorSheetState();
 }
@@ -3796,6 +3892,9 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                   final sw = (it['served_with'] ?? '') as String;
                   final pm =
                       (it['payment_method'] ?? 'cash') as String;
+                  final isCredit = (it['is_credit'] ?? 0) == 1;
+                  final isPaid =
+                      widget.paidSaleIds.contains(it['id'].toString());
                   return Card(
                     color: const Color(0xFF2A2A2A),
                     margin: const EdgeInsets.symmetric(
@@ -3814,7 +3913,9 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                                 '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
                                 style: const TextStyle(
                                     color: Colors.white54, fontSize: 12)),
-                            if ((it['is_credit'] ?? 0) == 1)
+                            if (isCredit && isPaid)
+                              paidBadge(pm == 'credit' ? 'cash' : pm)
+                            else if (isCredit)
                               creditBadge()
                             else
                               paymentBadge(pm),
@@ -4297,7 +4398,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       color: Colors.white54,
                                       fontSize: 11)),
                               if (isCredit && isPaid)
-                                paidBadge(pm)
+                                paidBadge(pm == 'credit' ? 'cash' : pm)
                               else if (isCredit)
                                 creditBadge()
                               else
@@ -4437,7 +4538,7 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
                                       color: Colors.white54,
                                       fontSize: 11)),
                               if (isCredit && isPaid)
-                                paidBadge(pm)
+                                paidBadge(pm == 'credit' ? 'cash' : pm)
                               else if (isCredit)
                                 creditBadge()
                               else
@@ -4620,7 +4721,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 11)),
                     if (isCredit && isPaid)
-                      paidBadge(pm)
+                      paidBadge(pm == 'credit' ? 'cash' : pm)
                     else if (isCredit)
                       creditBadge()
                     else
