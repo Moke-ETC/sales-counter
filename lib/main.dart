@@ -60,7 +60,6 @@ const List<Map<String, dynamic>> paymentMethods = [
   {'key': 'telebirr', 'label': 'ቴሌብር', 'short': 'ቴሌ', 'icon': Icons.phone_android, 'color': Colors.lightBlue},
 ];
 
-// Helper functions
 String payLabel(String key) {
   for (var p in paymentMethods) {
     if (p['key'] == key) return p['label'] as String;
@@ -577,7 +576,7 @@ class DB {
       {'name': 'ሽሮ ባይባይ', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ሽሮ በቅቤ', 'price': 150.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ቅቅል', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
+      {'name': 'ጎመን አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
       {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
       {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
       {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
@@ -750,6 +749,9 @@ class Inventory {
       return {
         'enjera': (d['enjera'] ?? 0) as int,
         'bread': (d['bread'] ?? 0) as int,
+        'water2l': (d['water2l'] ?? 0) as int,
+        'water1l': (d['water1l'] ?? 0) as int,
+        'water05l': (d['water05l'] ?? 0) as int,
       };
     });
   }
@@ -759,26 +761,39 @@ class Inventory {
       final snap = await _db.collection('inventory').doc('stock').get()
           .timeout(const Duration(seconds: 5));
       final d = snap.data() ?? {};
-      return {'enjera': (d['enjera'] ?? 0) as int, 'bread': (d['bread'] ?? 0) as int};
+      return {
+        'enjera': (d['enjera'] ?? 0) as int,
+        'bread': (d['bread'] ?? 0) as int,
+        'water2l': (d['water2l'] ?? 0) as int,
+        'water1l': (d['water1l'] ?? 0) as int,
+        'water05l': (d['water05l'] ?? 0) as int,
+      };
     } catch (e) {
-      return {'enjera': 0, 'bread': 0};
+      return {
+        'enjera': 0,
+        'bread': 0,
+        'water2l': 0,
+        'water1l': 0,
+        'water05l': 0
+      };
     }
   }
 
-  static Future<void> setStock(int enjera, int bread) async {
+  static Future<void> setStock(Map<String, int> values) async {
     try {
       await _db.collection('inventory').doc('stock').set({
-        'enjera': enjera, 'bread': bread,
+        ...values,
         'updatedAt': FieldValue.serverTimestamp(),
       }).timeout(const Duration(seconds: 5));
     } catch (e) {}
   }
 
-  static Future<void> addStock(int enjera, int bread) async {
+  static Future<void> addStock(Map<String, int> values) async {
     try {
       final updates = <String, dynamic>{};
-      if (enjera != 0) updates['enjera'] = FieldValue.increment(enjera);
-      if (bread != 0) updates['bread'] = FieldValue.increment(bread);
+      values.forEach((k, v) {
+        if (v != 0) updates[k] = FieldValue.increment(v);
+      });
       if (updates.isEmpty) return;
       updates['updatedAt'] = FieldValue.serverTimestamp();
       await _db.collection('inventory').doc('stock')
@@ -819,23 +834,25 @@ class NotificationsLog {
   static final _controller =
       StreamController<List<Map<String, dynamic>>>.broadcast();
   static final List<Map<String, dynamic>> _items = [];
-  static bool _loadedFromPrefs = false;
+  static bool _loaded = false;
 
-  static Future<void> _loadFromPrefs() async {
-    if (_loadedFromPrefs) return;
-    _loadedFromPrefs = true;
+  static Future<void> _load() async {
+    if (_loaded) return;
+    _loaded = true;
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getStringList('notif_log') ?? [];
       for (var s in raw) {
         try {
           final parts = s.split('|||');
-          if (parts.length >= 4) {
+          if (parts.length >= 6) {
             _items.add({
               'ts': parts[0],
               'waiter': parts[1],
-              'total': double.tryParse(parts[2]) ?? 0,
-              'method': parts[3],
+              'item': parts[2],
+              'qty': int.tryParse(parts[3]) ?? 0,
+              'total': double.tryParse(parts[4]) ?? 0,
+              'method': parts[5],
             });
           }
         } catch (_) {}
@@ -845,18 +862,16 @@ class NotificationsLog {
   }
 
   static Stream<List<Map<String, dynamic>>> stream() {
-    _loadFromPrefs();
+    _load();
     return _controller.stream;
   }
 
   static Future<void> _persist() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = _items
-          .take(100)
-          .map((e) =>
-              '${e['ts']}|||${e['waiter']}|||${e['total']}|||${e['method']}')
-          .toList();
+      final raw = _items.take(100).map((e) =>
+          '${e['ts']}|||${e['waiter']}|||${e['item']}|||${e['qty']}|||${e['total']}|||${e['method']}'
+          ).toList();
       await prefs.setStringList('notif_log', raw);
     } catch (_) {}
   }
@@ -865,6 +880,8 @@ class NotificationsLog {
     _items.add({
       'ts': DateTime.now().toIso8601String(),
       'waiter': sale['waiter'] ?? '',
+      'item': sale['item_name'] ?? '',
+      'qty': sale['quantity'] ?? 0,
       'total': ((sale['total_price'] ?? 0) as num).toDouble(),
       'method': sale['payment_method'] ?? 'cash',
     });
@@ -877,53 +894,88 @@ class NotificationsLog {
   static List<Map<String, dynamic>> get all => List.from(_items.reversed);
 }
 
-// ==================== CREDIT LEDGER ====================
-Map<String, Map<String, dynamic>> computeCreditLedger(
+// ==================== HELPERS ====================
+/// Compute credit ledger and mark paid status for sales.
+/// Returns map: customer -> {credit, paid, balance, ...}
+/// Also returns per-sale paid status map: saleId -> isPaid
+Map<String, dynamic> computeCreditAndPaidStatus(
     List<Map<String, dynamic>> rows) {
-  final map = <String, Map<String, dynamic>>{};
+  final ledger = <String, Map<String, dynamic>>{};
+  final paidSaleIds = <String>{};
 
+  // Collect credit sales per customer ordered by time
+  final salesByCustomer = <String, List<Map<String, dynamic>>>{};
   for (var s in rows) {
     if ((s['voided'] ?? 0) == 1) continue;
     final c = ((s['customer'] ?? '') as String).trim();
     if (c.isEmpty) continue;
-
     final cat = (s['category'] ?? '') as String;
-    final isPayment = cat == 'payment';
-    final amt = ((s['total_price'] ?? 0) as num).toDouble();
-
-    if (!isPayment && (s['is_credit'] ?? 0) != 1) continue;
-
-    map.putIfAbsent(c, () => {
-          'customer': c,
-          'credit': 0.0,
-          'paid': 0.0,
-          'balance': 0.0,
-          'order_count': 0,
-          'qty': 0,
-          'last_time': '',
-        });
-
-    if (isPayment) {
-      map[c]!['paid'] = (map[c]!['paid'] as double) + amt.abs();
-    } else {
-      map[c]!['credit'] = (map[c]!['credit'] as double) + amt;
-      map[c]!['order_count'] = (map[c]!['order_count'] as int) + 1;
-      map[c]!['qty'] =
-          (map[c]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
-    }
-
-    final ts = (s['timestamp'] ?? '') as String;
-    if (ts.compareTo(map[c]!['last_time'] as String) > 0) {
-      map[c]!['last_time'] = ts;
-    }
+    if (cat == 'payment') continue;
+    if ((s['is_credit'] ?? 0) != 1) continue;
+    salesByCustomer.putIfAbsent(c, () => []).add(s);
   }
 
-  for (var c in map.keys) {
-    map[c]!['balance'] =
-        (map[c]!['credit'] as double) - (map[c]!['paid'] as double);
+  // Collect payments per customer
+  final paymentsByCustomer = <String, List<Map<String, dynamic>>>{};
+  for (var s in rows) {
+    if ((s['voided'] ?? 0) == 1) continue;
+    final c = ((s['customer'] ?? '') as String).trim();
+    if (c.isEmpty) continue;
+    final cat = (s['category'] ?? '') as String;
+    if (cat != 'payment') continue;
+    paymentsByCustomer.putIfAbsent(c, () => []).add(s);
   }
 
-  return map;
+  // Build ledger + determine paid status
+  for (var c in salesByCustomer.keys) {
+    final cSales = List<Map<String, dynamic>>.from(salesByCustomer[c]!);
+    cSales.sort((a, b) =>
+        ((a['timestamp'] ?? '') as String)
+            .compareTo((b['timestamp'] ?? '') as String));
+
+    double totalCredit = 0;
+    for (var s in cSales) {
+      totalCredit += ((s['total_price'] ?? 0) as num).toDouble();
+    }
+
+    double totalPaid = 0;
+    for (var p in (paymentsByCustomer[c] ?? [])) {
+      totalPaid += ((p['total_price'] ?? 0) as num).doubleValue.abs();
+    }
+
+    // FIFO: apply payments to oldest unpaid sales
+    double remainingPaid = totalPaid;
+    for (var s in cSales) {
+      final amt = ((s['total_price'] ?? 0) as num).toDouble();
+      if (remainingPaid >= amt - 0.01) {
+        // Full payment for this sale
+        paidSaleIds.add(s['id'].toString());
+        remainingPaid -= amt;
+      } else if (remainingPaid > 0.01) {
+        // Partial payment — mark as not fully paid
+        remainingPaid = 0;
+      }
+    }
+
+    final lastTs = cSales.isNotEmpty
+        ? cSales.last['timestamp'] as String
+        : '';
+    ledger[c] = {
+      'customer': c,
+      'credit': totalCredit,
+      'paid': totalPaid,
+      'balance': totalCredit - totalPaid,
+      'order_count': cSales.length,
+      'qty': cSales.fold<int>(
+          0, (sum, s) => sum + ((s['quantity'] ?? 0) as int)),
+      'last_time': lastTs,
+    };
+  }
+
+  return {
+    'ledger': ledger,
+    'paidSaleIds': paidSaleIds,
+  };
 }
 
 // ==================== CART MODEL ====================
@@ -1034,6 +1086,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final wasPayment = paymentMethod;
     final enjDeduct = enjeraCount;
     final brdDeduct = breadCount;
+    final w2 = water2L;
+    final w1 = water1L;
+    final w05 = water05L;
     final timestamp = DateTime.now().toIso8601String();
 
     final localIds = <int, Map<String, dynamic>>{};
@@ -1510,7 +1565,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ==================== PAYMENT BADGE WIDGET ====================
+// ==================== PAYMENT BADGE ====================
 Widget paymentBadge(String method) {
   final color = payColor(method);
   return Container(
@@ -1527,7 +1582,50 @@ Widget paymentBadge(String method) {
         const SizedBox(width: 4),
         Text(payLabel(method),
             style: TextStyle(
-                color: color,
+                color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+      ],
+    ),
+  );
+}
+
+Widget paidBadge(String method) {
+  final color = payColor(method);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.2),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color, width: 1),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.check_circle, color: Colors.green, size: 12),
+        const SizedBox(width: 3),
+        Text('ተከፈለ',
+            style: TextStyle(
+                color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+      ],
+    ),
+  );
+}
+
+Widget creditBadge() {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: Colors.orange.withOpacity(0.2),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: Colors.orange, width: 1),
+    ),
+    child: const Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.credit_card, color: Colors.orange, size: 12),
+        SizedBox(width: 4),
+        Text('ዱቤ',
+            style: TextStyle(
+                color: Colors.orange,
                 fontSize: 10,
                 fontWeight: FontWeight.bold)),
       ],
@@ -1544,7 +1642,6 @@ class OwnerScreen extends StatefulWidget {
 
 class _OwnerScreenState extends State<OwnerScreen> {
   int _lastCount = -1;
-  int _lastNotifCount = 0;
   bool _initialized = false;
 
   Future<void> _logout() async {
@@ -1555,9 +1652,22 @@ class _OwnerScreenState extends State<OwnerScreen> {
         MaterialPageRoute(builder: (_) => const SetupScreen()));
   }
 
-  void _playAlert() {
-    SystemSound.play(SystemSoundType.alert);
-    HapticFeedback.mediumImpact();
+  Future<void> _alert() async {
+    // Strong alert using system sound + haptic
+    try {
+      await SystemSound.play(SystemSoundType.alert);
+    } catch (_) {}
+    try {
+      HapticFeedback.heavyImpact();
+    } catch (_) {}
+    // Play a second time for emphasis
+    await Future.delayed(const Duration(milliseconds: 150));
+    try {
+      await SystemSound.play(SystemSoundType.click);
+    } catch (_) {}
+    try {
+      HapticFeedback.mediumImpact();
+    } catch (_) {}
   }
 
   Future<void> _exportCsv() async {
@@ -1696,16 +1806,36 @@ class _OwnerScreenState extends State<OwnerScreen> {
           StreamBuilder<Map<String, int>>(
             stream: Inventory.stockStream(),
             builder: (ctx, snap) {
-              final stock = snap.data ?? {'enjera': 0, 'bread': 0};
+              final stock = snap.data ?? {
+                'enjera': 0,
+                'bread': 0,
+                'water2l': 0,
+                'water1l': 0,
+                'water05l': 0
+              };
+              final totalWater = (stock['water2l'] ?? 0) +
+                  (stock['water1l'] ?? 0) +
+                  (stock['water05l'] ?? 0);
               return Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 color: const Color(0xFF0A0A0A),
-                child: Row(
+                child: Column(
                   children: [
-                    _stockChip('🍽️ እንጀራ', stock['enjera'] ?? 0, Colors.amber),
-                    const SizedBox(width: 8),
-                    _stockChip('🍞 ዳቦ', stock['bread'] ?? 0, Colors.brown),
+                    Row(
+                      children: [
+                        _stockChip('🍽️ እንጀራ', stock['enjera'] ?? 0, Colors.amber),
+                        const SizedBox(width: 8),
+                        _stockChip('🍞 ዳቦ', stock['bread'] ?? 0, Colors.brown),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        _stockChip('💧 ጠቅላላ ውሃ', totalWater,
+                            Colors.lightBlueAccent),
+                      ],
+                    ),
                   ],
                 ),
               );
@@ -1740,36 +1870,62 @@ class _OwnerScreenState extends State<OwnerScreen> {
                 final now = DateTime.now();
                 final todayStart = DateTime(now.year, now.month, now.day);
                 final all = snap.data!;
+
+                // Get paid status from credit ledger
+                final statusData = computeCreditAndPaidStatus(all);
+                final paidSaleIds =
+                    (statusData['paidSaleIds'] as Set).cast<String>();
+
                 final sales = all.where((s) {
                   if ((s['category'] ?? '') == 'payment') return false;
                   final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
                   return ts != null && ts.isAfter(todayStart);
                 }).toList();
 
-                // Sort newest first
                 sales.sort((a, b) =>
                     ((b['timestamp'] ?? '') as String)
                         .compareTo((a['timestamp'] ?? '') as String));
 
-                // Detect new sale → notify
                 if (_initialized && sales.length > _lastCount) {
                   final diff = sales.length - _lastCount;
                   for (var i = 0; i < diff && i < sales.length; i++) {
                     NotificationsLog.add(sales[i]);
                   }
                   final newest = sales.first;
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) async {
                     if (!mounted) return;
-                    _playAlert();
+                    await _alert();
+                    if (!mounted) return;
                     final amt =
                         ((newest['total_price'] ?? 0) as num).toDouble();
                     final w = newest['waiter'] ?? '';
                     final pm = newest['payment_method'] ?? 'cash';
+                    final item = newest['item_name'] ?? '';
+                    final qty = newest['quantity'] ?? 0;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(
-                          '🔔 አዲስ ሽያጭ: $w • ${amt.toStringAsFixed(0)} ብር • ${payLabel(pm)}'),
-                      backgroundColor: Colors.green,
-                      duration: const Duration(seconds: 3),
+                      content: Row(
+                        children: [
+                          const Icon(Icons.notifications_active,
+                              color: Colors.white, size: 24),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('🔔 $w — ${amt.toStringAsFixed(0)} ብር',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14)),
+                                Text('$item × $qty • ${payLabel(pm)}',
+                                    style: const TextStyle(fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      backgroundColor: Colors.green.shade800,
+                      duration: const Duration(seconds: 4),
                     ));
                   });
                 }
@@ -1853,7 +2009,6 @@ class _OwnerScreenState extends State<OwnerScreen> {
                         ],
                       ),
                     ),
-                    // Per-waiter cards
                     const Padding(
                       padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                       child: Text('በአስተናጋጅ:',
@@ -1903,7 +2058,6 @@ class _OwnerScreenState extends State<OwnerScreen> {
                         ),
                       );
                     }),
-                    // Live feed of latest 20 sales
                     const Padding(
                       padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                       child: Text('የቅርብ ሽያጮች:',
@@ -1912,10 +2066,12 @@ class _OwnerScreenState extends State<OwnerScreen> {
                               fontWeight: FontWeight.bold,
                               fontSize: 16)),
                     ),
-                    ...sales.take(20).map((s) {
+                    ...sales.take(30).map((s) {
                       final ts =
                           DateTime.tryParse((s['timestamp'] ?? '') as String);
                       final pm = (s['payment_method'] ?? 'cash') as String;
+                      final isCredit = (s['is_credit'] ?? 0) == 1;
+                      final isPaid = paidSaleIds.contains(s['id'].toString());
                       return Card(
                         color: const Color(0xFF2A2A2A),
                         margin: const EdgeInsets.symmetric(
@@ -1940,32 +2096,19 @@ class _OwnerScreenState extends State<OwnerScreen> {
                                   color: Colors.white, fontSize: 14)),
                           subtitle: Padding(
                             padding: const EdgeInsets.only(top: 4),
-                            child: Row(
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
                               children: [
                                 Text(
                                   '${s['waiter']}${ts != null ? " • ${DateFormat('HH:mm').format(ts)}" : ""}',
                                   style: const TextStyle(
                                       color: Colors.white54, fontSize: 11),
                                 ),
-                                const SizedBox(width: 8),
-                                if ((s['is_credit'] ?? 0) == 1)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color:
-                                          Colors.orange.withOpacity(0.2),
-                                      borderRadius:
-                                          BorderRadius.circular(4),
-                                      border: Border.all(
-                                          color: Colors.orange, width: 1),
-                                    ),
-                                    child: const Text('ዱቤ',
-                                        style: TextStyle(
-                                            color: Colors.orange,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold)),
-                                  )
+                                if (isCredit && isPaid)
+                                  paidBadge(pm == 'credit' ? 'cash' : pm)
+                                else if (isCredit)
+                                  creditBadge()
                                 else
                                   paymentBadge(pm),
                               ],
@@ -2090,10 +2233,11 @@ class NotificationsScreen extends StatelessWidget {
                         fontWeight: FontWeight.bold),
                   ),
                   subtitle: Text(
-                    '${payLabel(method)}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
+                    '${n['item']} × ${n['qty']} • ${payLabel(method)}\n${ts != null ? DateFormat('MMM d, HH:mm').format(ts) : ""}',
                     style: const TextStyle(
                         color: Colors.white54, fontSize: 12),
                   ),
+                  isThreeLine: true,
                 ),
               );
             },
@@ -2133,7 +2277,9 @@ class CreditScreen extends StatelessWidget {
             );
           }
           final rows = snapS.data!;
-          final ledger = computeCreditLedger(rows);
+          final statusData = computeCreditAndPaidStatus(rows);
+          final ledger =
+              (statusData['ledger'] as Map).cast<String, Map<String, dynamic>>();
           final list = ledger.values
               .where((c) => (c['balance'] as double) > 0.01)
               .toList();
@@ -2509,7 +2655,12 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
           if (!snapS.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final all = snapS.data!
+          final allRows = snapS.data!;
+          final statusData = computeCreditAndPaidStatus(allRows);
+          final paidSaleIds =
+              (statusData['paidSaleIds'] as Set).cast<String>();
+
+          final all = allRows
               .where((s) =>
                   ((s['customer'] ?? '') as String).trim() ==
                   customer.trim())
@@ -2541,6 +2692,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   : '${s['item_name']} × ${s['quantity']}',
               'by': s['waiter'] ?? '',
               'payment_method': s['payment_method'] ?? 'cash',
+              'saleId': s['id'].toString(),
+              'isSalePaid': paidSaleIds.contains(s['id'].toString()),
             });
           }
           history.sort((a, b) => (b['timestamp'] as String)
@@ -2602,6 +2755,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                               h['timestamp'] as String);
                           final pm =
                               h['payment_method'] as String? ?? 'cash';
+                          final isSalePaid = h['isSalePaid'] as bool;
+
                           return Card(
                             color: const Color(0xFF2A2A2A),
                             margin: const EdgeInsets.symmetric(
@@ -2610,11 +2765,15 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                               leading: CircleAvatar(
                                 backgroundColor: isPayment
                                     ? Colors.green.shade900
-                                    : Colors.orange.shade900,
+                                    : (isSalePaid
+                                        ? Colors.green.shade700
+                                        : Colors.orange.shade900),
                                 child: Icon(
                                     isPayment
                                         ? Icons.payments
-                                        : Icons.shopping_bag,
+                                        : (isSalePaid
+                                            ? Icons.check
+                                            : Icons.shopping_bag),
                                     color: Colors.white,
                                     size: 20),
                               ),
@@ -2625,7 +2784,9 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                       fontWeight: FontWeight.w600)),
                               subtitle: Padding(
                                 padding: const EdgeInsets.only(top: 4),
-                                child: Row(
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
                                   children: [
                                     Text(
                                       '${h['by']}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
@@ -2633,15 +2794,19 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                           color: Colors.white54,
                                           fontSize: 11),
                                     ),
-                                    const SizedBox(width: 8),
-                                    paymentBadge(pm),
+                                    if (isPayment)
+                                      paymentBadge(pm)
+                                    else if (isSalePaid)
+                                      paidBadge(pm == 'credit' ? 'cash' : pm)
+                                    else
+                                      creditBadge(),
                                   ],
                                 ),
                               ),
                               trailing: Text(
                                 '${isPayment ? "-" : "+"}${(h['amount'] as double).toStringAsFixed(0)}',
                                 style: TextStyle(
-                                    color: isPayment
+                                    color: isPayment || isSalePaid
                                         ? Colors.green
                                         : Colors.orangeAccent,
                                     fontWeight: FontWeight.bold,
@@ -2688,8 +2853,10 @@ class StockManageScreen extends StatefulWidget {
 class _StockManageScreenState extends State<StockManageScreen> {
   final enjeraCtrl = TextEditingController();
   final breadCtrl = TextEditingController();
-  int currentEnjera = 0;
-  int currentBread = 0;
+  final water2Ctrl = TextEditingController();
+  final water1Ctrl = TextEditingController();
+  final water05Ctrl = TextEditingController();
+  Map<String, int> current = {};
   bool loading = true;
 
   @override
@@ -2702,6 +2869,9 @@ class _StockManageScreenState extends State<StockManageScreen> {
   void dispose() {
     enjeraCtrl.dispose();
     breadCtrl.dispose();
+    water2Ctrl.dispose();
+    water1Ctrl.dispose();
+    water05Ctrl.dispose();
     super.dispose();
   }
 
@@ -2709,33 +2879,37 @@ class _StockManageScreenState extends State<StockManageScreen> {
     final stock = await Inventory.getStock();
     if (!mounted) return;
     setState(() {
-      currentEnjera = stock['enjera'] ?? 0;
-      currentBread = stock['bread'] ?? 0;
-      enjeraCtrl.text = '$currentEnjera';
-      breadCtrl.text = '$currentBread';
+      current = stock;
+      enjeraCtrl.text = '${stock['enjera'] ?? 0}';
+      breadCtrl.text = '${stock['bread'] ?? 0}';
+      water2Ctrl.text = '${stock['water2l'] ?? 0}';
+      water1Ctrl.text = '${stock['water1l'] ?? 0}';
+      water05Ctrl.text = '${stock['water05l'] ?? 0}';
       loading = false;
     });
   }
 
+  Map<String, int> _readValues() => {
+        'enjera': int.tryParse(enjeraCtrl.text.trim()) ?? 0,
+        'bread': int.tryParse(breadCtrl.text.trim()) ?? 0,
+        'water2l': int.tryParse(water2Ctrl.text.trim()) ?? 0,
+        'water1l': int.tryParse(water1Ctrl.text.trim()) ?? 0,
+        'water05l': int.tryParse(water05Ctrl.text.trim()) ?? 0,
+      };
+
   Future<void> _save() async {
-    final e = int.tryParse(enjeraCtrl.text.trim()) ?? 0;
-    final b = int.tryParse(breadCtrl.text.trim()) ?? 0;
-    await Inventory.setStock(e, b);
+    await Inventory.setStock(_readValues());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('✅ Stock ተቀይሯል: እንጀራ $e • ዳቦ $b'),
-        backgroundColor: Colors.green));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✅ Stock ተቀይሯል'), backgroundColor: Colors.green));
     Navigator.pop(context);
   }
 
   Future<void> _addTo() async {
-    final e = int.tryParse(enjeraCtrl.text.trim()) ?? 0;
-    final b = int.tryParse(breadCtrl.text.trim()) ?? 0;
-    await Inventory.addStock(e, b);
+    await Inventory.addStock(_readValues());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('✅ ተጨምሯል: +$e እንጀራ • +$b ዳቦ'),
-        backgroundColor: Colors.green));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✅ ተጨምሯል'), backgroundColor: Colors.green));
     _load();
   }
 
@@ -2744,11 +2918,14 @@ class _StockManageScreenState extends State<StockManageScreen> {
     if (loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final totalWater = (current['water2l'] ?? 0) +
+        (current['water1l'] ?? 0) +
+        (current['water05l'] ?? 0);
     return Scaffold(
       appBar: AppBar(
           backgroundColor: Colors.amber.shade900,
           title: const Text('Stock አስተካክል')),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2758,62 +2935,60 @@ class _StockManageScreenState extends State<StockManageScreen> {
               decoration: BoxDecoration(
                   color: const Color(0xFF1F1F1F),
                   borderRadius: BorderRadius.circular(10)),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              child: Column(
                 children: [
-                  Text('🍽️ እንጀራ: $currentEnjera',
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Text('🍽️ እንጀራ: ${current['enjera'] ?? 0}',
+                          style: const TextStyle(
+                              color: Colors.amber,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                      Text('🍞 ዳቦ: ${current['bread'] ?? 0}',
+                          style: const TextStyle(
+                              color: Colors.brown,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Text('💧 2L: ${current['water2l'] ?? 0}',
+                          style: const TextStyle(
+                              color: Colors.lightBlueAccent,
+                              fontSize: 14)),
+                      Text('💧 1L: ${current['water1l'] ?? 0}',
+                          style: const TextStyle(
+                              color: Colors.lightBlueAccent,
+                              fontSize: 14)),
+                      Text('💧 0.5L: ${current['water05l'] ?? 0}',
+                          style: const TextStyle(
+                              color: Colors.lightBlueAccent,
+                              fontSize: 14)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text('💧 ጠቅላላ ውሃ: $totalWater',
                       style: const TextStyle(
-                          color: Colors.amber,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
-                  Text('🍞 ዳቦ: $currentBread',
-                      style: const TextStyle(
-                          color: Colors.brown,
+                          color: Colors.lightBlue,
                           fontSize: 16,
                           fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
             const SizedBox(height: 20),
-            const Text('🍽️ ጠቅላላ እንጀራ:',
-                style: TextStyle(color: Colors.amber, fontSize: 15)),
-            const SizedBox(height: 6),
-            TextField(
-              controller: enjeraCtrl,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold),
-              decoration: InputDecoration(
-                hintText: '0',
-                filled: true,
-                fillColor: const Color(0xFF2A2A2A),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.amber)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('🍞 ጠቅላላ ዳቦ:',
-                style: TextStyle(color: Colors.brown, fontSize: 15)),
-            const SizedBox(height: 6),
-            TextField(
-              controller: breadCtrl,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold),
-              decoration: InputDecoration(
-                hintText: '0',
-                filled: true,
-                fillColor: const Color(0xFF2A2A2A),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.brown)),
-              ),
-            ),
+            _stockField('🍽️ ጠቅላላ እንጀራ:', enjeraCtrl, Colors.amber),
+            const SizedBox(height: 12),
+            _stockField('🍞 ጠቅላላ ዳቦ:', breadCtrl, Colors.brown),
+            const SizedBox(height: 12),
+            _stockField('💧 2 ሊትር ውሃ:', water2Ctrl, Colors.lightBlueAccent),
+            const SizedBox(height: 12),
+            _stockField('💧 1 ሊትር ውሃ:', water1Ctrl, Colors.lightBlueAccent),
+            const SizedBox(height: 12),
+            _stockField('💧 0.5 ሊትር ውሃ:', water05Ctrl, Colors.lightBlueAccent),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               icon: const Icon(Icons.refresh, color: Colors.black),
@@ -2843,6 +3018,33 @@ class _StockManageScreenState extends State<StockManageScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _stockField(String label, TextEditingController ctrl, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(label, style: TextStyle(color: color, fontSize: 14)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            hintText: '0',
+            isDense: true,
+            filled: true,
+            fillColor: const Color(0xFF2A2A2A),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: color)),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3619,16 +3821,19 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                               const TextStyle(color: Colors.white)),
                       subtitle: Padding(
                         padding: const EdgeInsets.only(top: 4),
-                        child: Row(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
                           children: [
                             Text(
                                 '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
                                 style: const TextStyle(
                                     color: Colors.white54, fontSize: 12)),
-                            const SizedBox(width: 6),
-                            paymentBadge(pm),
-                            if (sw.isNotEmpty) ...[
-                              const SizedBox(width: 6),
+                            if ((it['is_credit'] ?? 0) == 1)
+                              creditBadge()
+                            else
+                              paymentBadge(pm),
+                            if (sw.isNotEmpty)
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 5, vertical: 1),
@@ -3644,7 +3849,6 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                                         color: Colors.white70,
                                         fontSize: 10)),
                               ),
-                            ],
                           ],
                         ),
                       ),
@@ -3932,6 +4136,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<Map<String, dynamic>> sales = [];
   bool loading = true;
   String waiterName = '';
+  Set<String> paidSaleIds = {};
 
   @override
   void initState() {
@@ -3950,6 +4155,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final all = await DB.getAllSales();
     sales =
         all.where((s) => (s['waiter'] ?? '') == waiterName).toList();
+
+    // Get paid status from Firestore
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sales')
+          .get()
+          .timeout(const Duration(seconds: 5));
+      final allRemote =
+          snap.docs.map((d) => {...d.data(), 'id': d.id}).toList();
+      final statusData = computeCreditAndPaidStatus(allRemote);
+      paidSaleIds = (statusData['paidSaleIds'] as Set).cast<String>();
+    } catch (_) {}
+
     setState(() => loading = false);
   }
 
@@ -4071,6 +4289,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     final ts = DateTime.parse(s['timestamp'] as String);
                     final pm =
                         (s['payment_method'] ?? 'cash') as String;
+                    final isCredit = (s['is_credit'] ?? 0) == 1;
+                    final isPaid =
+                        paidSaleIds.contains(s['id'].toString());
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -4082,30 +4303,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             style: const TextStyle(color: Colors.white)),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 4),
-                          child: Row(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
                             children: [
                               Text(
                                   '${s['customer'] ?? ""} • ${DateFormat('MMM d, HH:mm').format(ts)}',
                                   style: const TextStyle(
                                       color: Colors.white54,
                                       fontSize: 11)),
-                              const SizedBox(width: 8),
-                              if ((s['is_credit'] ?? 0) == 1)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                        color: Colors.orange, width: 1),
-                                  ),
-                                  child: const Text('ዱቤ',
-                                      style: TextStyle(
-                                          color: Colors.orange,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold)),
-                                )
+                              if (isCredit && isPaid)
+                                paidBadge(pm)
+                              else if (isCredit)
+                                creditBadge()
                               else
                                 paymentBadge(pm),
                             ],
@@ -4156,7 +4366,7 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
           backgroundColor: Colors.amber.shade900,
           title: Text('$waiter — ሽያጮቼ')),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Cloud.waiterSalesStream(waiter),
+        stream: Cloud.allSalesStream(),
         builder: (ctx, snap) {
           if (snap.hasError) {
             return Center(
@@ -4166,12 +4376,23 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
+          final allRows = snap.data!;
+          final statusData = computeCreditAndPaidStatus(allRows);
+          final paidSaleIds =
+              (statusData['paidSaleIds'] as Set).cast<String>();
+
           final now = DateTime.now();
           final todayStart = DateTime(now.year, now.month, now.day);
-          final sales = snap.data!.where((s) {
+          final sales = allRows
+              .where((s) =>
+                  s['waiter'] == waiter &&
+                  (s['category'] ?? '') != 'payment' &&
+                  (s['voided'] ?? 0) != 1)
+              .where((s) {
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
             return ts != null && ts.isAfter(todayStart);
           }).toList();
+
           if (sales.isEmpty) {
             return const Center(
                 child: Text('ምንም ሽያጭ የለም',
@@ -4209,6 +4430,9 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
                         (s['timestamp'] ?? '') as String);
                     final pm =
                         (s['payment_method'] ?? 'cash') as String;
+                    final isCredit = (s['is_credit'] ?? 0) == 1;
+                    final isPaid =
+                        paidSaleIds.contains(s['id'].toString());
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -4219,30 +4443,19 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
                             style: const TextStyle(color: Colors.white)),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 4),
-                          child: Row(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
                             children: [
                               Text(
                                   '${s['customer'] ?? ""} • ${ts != null ? DateFormat('HH:mm').format(ts) : ""}',
                                   style: const TextStyle(
                                       color: Colors.white54,
                                       fontSize: 11)),
-                              const SizedBox(width: 8),
-                              if ((s['is_credit'] ?? 0) == 1)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                        color: Colors.orange, width: 1),
-                                  ),
-                                  child: const Text('ዱቤ',
-                                      style: TextStyle(
-                                          color: Colors.orange,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold)),
-                                )
+                              if (isCredit && isPaid)
+                                paidBadge(pm)
+                              else if (isCredit)
+                                creditBadge()
                               else
                                 paymentBadge(pm),
                             ],
@@ -4284,6 +4497,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   double telebirrTotal = 0;
   double creditTotal = 0;
   String waiterName = '';
+  Set<String> paidSaleIds = {};
 
   @override
   void initState() {
@@ -4301,6 +4515,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final all = await DB.getAllSales();
     final rows =
         all.where((s) => (s['waiter'] ?? '') == waiterName).toList();
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sales')
+          .get()
+          .timeout(const Duration(seconds: 5));
+      final remote =
+          snap.docs.map((d) => {...d.data(), 'id': d.id}).toList();
+      final statusData = computeCreditAndPaidStatus(remote);
+      paidSaleIds = (statusData['paidSaleIds'] as Set).cast<String>();
+    } catch (_) {}
+
     double t = 0, cash = 0, cbe = 0, tele = 0, credit = 0;
     int q = 0, enj = 0, brd = 0;
     for (var r in rows) {
@@ -4392,12 +4618,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ...summary.map((s) {
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
             final pm = (s['payment_method'] ?? 'cash') as String;
+            final isCredit = (s['is_credit'] ?? 0) == 1;
+            final isPaid = paidSaleIds.contains(s['id'].toString());
             return ListTile(
               title: Text('${s['item_name']} × ${s['quantity']}',
                   style: const TextStyle(color: Colors.white)),
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Row(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
                     Text(
                         ts != null
@@ -4405,23 +4635,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             : '',
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 11)),
-                    const SizedBox(width: 8),
-                    if ((s['is_credit'] ?? 0) == 1)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                              color: Colors.orange, width: 1),
-                        ),
-                        child: const Text('ዱቤ',
-                            style: TextStyle(
-                                color: Colors.orange,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold)),
-                      )
+                    if (isCredit && isPaid)
+                      paidBadge(pm)
+                    else if (isCredit)
+                      creditBadge()
                     else
                       paymentBadge(pm),
                   ],
