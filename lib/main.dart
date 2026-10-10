@@ -55,10 +55,39 @@ const Map<String, String> ownerInfo = {
 const String defaultPin = '1234';
 
 const List<Map<String, dynamic>> paymentMethods = [
-  {'key': 'cash', 'label': 'ጥሬ ገንዘብ', 'icon': Icons.payments, 'color': Colors.green},
-  {'key': 'cbe', 'label': 'CBE', 'icon': Icons.account_balance, 'color': Colors.purple},
-  {'key': 'telebirr', 'label': 'ቴሌብር', 'icon': Icons.phone_android, 'color': Colors.lightBlue},
+  {'key': 'cash', 'label': 'ጥሬ ገንዘብ', 'short': 'ጥሬ', 'icon': Icons.payments, 'color': Colors.green},
+  {'key': 'cbe', 'label': 'CBE', 'short': 'CBE', 'icon': Icons.account_balance, 'color': Colors.purple},
+  {'key': 'telebirr', 'label': 'ቴሌብር', 'short': 'ቴሌ', 'icon': Icons.phone_android, 'color': Colors.lightBlue},
 ];
+
+// Helper functions
+String payLabel(String key) {
+  for (var p in paymentMethods) {
+    if (p['key'] == key) return p['label'] as String;
+  }
+  return key;
+}
+
+String payShort(String key) {
+  for (var p in paymentMethods) {
+    if (p['key'] == key) return p['short'] as String;
+  }
+  return key;
+}
+
+IconData payIcon(String key) {
+  for (var p in paymentMethods) {
+    if (p['key'] == key) return p['icon'] as IconData;
+  }
+  return Icons.payments;
+}
+
+Color payColor(String key) {
+  for (var p in paymentMethods) {
+    if (p['key'] == key) return p['color'] as Color;
+  }
+  return Colors.grey;
+}
 
 // ==================== APP ====================
 class SalesApp extends StatelessWidget {
@@ -548,7 +577,7 @@ class DB {
       {'name': 'ሽሮ ባይባይ', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ሽሮ በቅቤ', 'price': 150.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ቅቅል', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ጎመን አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
+      {'name': 'አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
       {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
       {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
       {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
@@ -580,8 +609,6 @@ class DB {
       try { await db.execute('ALTER TABLE sales ADD COLUMN voided INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
       try { await db.execute('ALTER TABLE sales ADD COLUMN firestore_id TEXT NOT NULL DEFAULT ""'); } catch (_) {}
     }
-    // oldV 8: payments table (kept for legacy, but no longer used)
-    // oldV 9: no schema change — payments are now stored as sales rows
   }
 
   static Future<List<Map<String, dynamic>>> getMenu() async {
@@ -787,12 +814,70 @@ class Inventory {
   }
 }
 
+// ==================== NOTIFICATIONS LOG ====================
+class NotificationsLog {
+  static final _controller =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
+  static final List<Map<String, dynamic>> _items = [];
+  static bool _loadedFromPrefs = false;
+
+  static Future<void> _loadFromPrefs() async {
+    if (_loadedFromPrefs) return;
+    _loadedFromPrefs = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList('notif_log') ?? [];
+      for (var s in raw) {
+        try {
+          final parts = s.split('|||');
+          if (parts.length >= 4) {
+            _items.add({
+              'ts': parts[0],
+              'waiter': parts[1],
+              'total': double.tryParse(parts[2]) ?? 0,
+              'method': parts[3],
+            });
+          }
+        } catch (_) {}
+      }
+      if (_items.isNotEmpty) _controller.add(List.from(_items.reversed));
+    } catch (_) {}
+  }
+
+  static Stream<List<Map<String, dynamic>>> stream() {
+    _loadFromPrefs();
+    return _controller.stream;
+  }
+
+  static Future<void> _persist() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = _items
+          .take(100)
+          .map((e) =>
+              '${e['ts']}|||${e['waiter']}|||${e['total']}|||${e['method']}')
+          .toList();
+      await prefs.setStringList('notif_log', raw);
+    } catch (_) {}
+  }
+
+  static Future<void> add(Map<String, dynamic> sale) async {
+    _items.add({
+      'ts': DateTime.now().toIso8601String(),
+      'waiter': sale['waiter'] ?? '',
+      'total': ((sale['total_price'] ?? 0) as num).toDouble(),
+      'method': sale['payment_method'] ?? 'cash',
+    });
+    if (!_controller.isClosed) {
+      _controller.add(List.from(_items.reversed));
+    }
+    await _persist();
+  }
+
+  static List<Map<String, dynamic>> get all => List.from(_items.reversed);
+}
+
 // ==================== CREDIT LEDGER ====================
-/// Payment rows are stored in the `sales` collection with:
-///   category == 'payment'
-///   total_price == -amount  (negative)
-///   item_name == '💰 ክፍያ...'
-/// This way they sync using the SAME Firestore collection as sales.
 Map<String, Map<String, dynamic>> computeCreditLedger(
     List<Map<String, dynamic>> rows) {
   final map = <String, Map<String, dynamic>>{};
@@ -806,7 +891,6 @@ Map<String, Map<String, dynamic>> computeCreditLedger(
     final isPayment = cat == 'payment';
     final amt = ((s['total_price'] ?? 0) as num).toDouble();
 
-    // Skip normal non-credit sales
     if (!isPayment && (s['is_credit'] ?? 0) != 1) continue;
 
     map.putIfAbsent(c, () => {
@@ -822,8 +906,7 @@ Map<String, Map<String, dynamic>> computeCreditLedger(
     if (isPayment) {
       map[c]!['paid'] = (map[c]!['paid'] as double) + amt.abs();
     } else {
-      map[c]!['credit'] =
-          (map[c]!['credit'] as double) + amt;
+      map[c]!['credit'] = (map[c]!['credit'] as double) + amt;
       map[c]!['order_count'] = (map[c]!['order_count'] as int) + 1;
       map[c]!['qty'] =
           (map[c]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
@@ -1427,6 +1510,31 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// ==================== PAYMENT BADGE WIDGET ====================
+Widget paymentBadge(String method) {
+  final color = payColor(method);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.2),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color, width: 1),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(payIcon(method), color: color, size: 12),
+        const SizedBox(width: 4),
+        Text(payLabel(method),
+            style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.bold)),
+      ],
+    ),
+  );
+}
+
 // ==================== OWNER SCREEN ====================
 class OwnerScreen extends StatefulWidget {
   const OwnerScreen({super.key});
@@ -1436,6 +1544,7 @@ class OwnerScreen extends StatefulWidget {
 
 class _OwnerScreenState extends State<OwnerScreen> {
   int _lastCount = -1;
+  int _lastNotifCount = 0;
   bool _initialized = false;
 
   Future<void> _logout() async {
@@ -1519,6 +1628,47 @@ class _OwnerScreenState extends State<OwnerScreen> {
         backgroundColor: Colors.amber.shade900,
         title: const Text('ሜሪ ሽሮ — ባለቤት'),
         actions: [
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: NotificationsLog.stream(),
+            builder: (ctx, snap) {
+              final count = snap.data?.length ?? 0;
+              return Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications),
+                    tooltip: 'ማሳወቂያዎች',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen()),
+                    ),
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      right: 6,
+                      top: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                            minWidth: 16, minHeight: 16),
+                        child: Text(
+                          count > 99 ? '99+' : '$count',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
           IconButton(
               icon: const Icon(Icons.picture_as_pdf),
               tooltip: 'CSV አውጣ',
@@ -1538,11 +1688,6 @@ class _OwnerScreenState extends State<OwnerScreen> {
               tooltip: 'Stock አስተካክል',
               onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const StockManageScreen()))),
-          IconButton(
-              icon: const Icon(Icons.lock),
-              tooltip: 'ፒን ቀይር',
-              onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const ChangePinScreen()))),
           IconButton(icon: const Icon(Icons.settings), onPressed: _logout),
         ],
       ),
@@ -1601,14 +1746,31 @@ class _OwnerScreenState extends State<OwnerScreen> {
                   return ts != null && ts.isAfter(todayStart);
                 }).toList();
 
+                // Sort newest first
+                sales.sort((a, b) =>
+                    ((b['timestamp'] ?? '') as String)
+                        .compareTo((a['timestamp'] ?? '') as String));
+
+                // Detect new sale → notify
                 if (_initialized && sales.length > _lastCount) {
+                  final diff = sales.length - _lastCount;
+                  for (var i = 0; i < diff && i < sales.length; i++) {
+                    NotificationsLog.add(sales[i]);
+                  }
+                  final newest = sales.first;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted) return;
                     _playAlert();
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('🔔 አዲስ ሽያጭ መጥቷል!'),
-                        backgroundColor: Colors.green,
-                        duration: Duration(seconds: 2)));
+                    final amt =
+                        ((newest['total_price'] ?? 0) as num).toDouble();
+                    final w = newest['waiter'] ?? '';
+                    final pm = newest['payment_method'] ?? 'cash';
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(
+                          '🔔 አዲስ ሽያጭ: $w • ${amt.toStringAsFixed(0)} ብር • ${payLabel(pm)}'),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 3),
+                    ));
                   });
                 }
                 _initialized = true;
@@ -1691,6 +1853,7 @@ class _OwnerScreenState extends State<OwnerScreen> {
                         ],
                       ),
                     ),
+                    // Per-waiter cards
                     const Padding(
                       padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                       child: Text('በአስተናጋጅ:',
@@ -1737,6 +1900,83 @@ class _OwnerScreenState extends State<OwnerScreen> {
                                   color: Colors.amber,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 18)),
+                        ),
+                      );
+                    }),
+                    // Live feed of latest 20 sales
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Text('የቅርብ ሽያጮች:',
+                          style: TextStyle(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ),
+                    ...sales.take(20).map((s) {
+                      final ts =
+                          DateTime.tryParse((s['timestamp'] ?? '') as String);
+                      final pm = (s['payment_method'] ?? 'cash') as String;
+                      return Card(
+                        color: const Color(0xFF2A2A2A),
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 3),
+                        child: ListTile(
+                          dense: true,
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.teal.shade900,
+                            radius: 18,
+                            child: Text(
+                              ((s['waiter'] ?? '?') as String)
+                                  .substring(0, 1),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          title: Text(
+                              '${s['item_name']} × ${s['quantity']}',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 14)),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                Text(
+                                  '${s['waiter']}${ts != null ? " • ${DateFormat('HH:mm').format(ts)}" : ""}',
+                                  style: const TextStyle(
+                                      color: Colors.white54, fontSize: 11),
+                                ),
+                                const SizedBox(width: 8),
+                                if ((s['is_credit'] ?? 0) == 1)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          Colors.orange.withOpacity(0.2),
+                                      borderRadius:
+                                          BorderRadius.circular(4),
+                                      border: Border.all(
+                                          color: Colors.orange, width: 1),
+                                    ),
+                                    child: const Text('ዱቤ',
+                                        style: TextStyle(
+                                            color: Colors.orange,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold)),
+                                  )
+                                else
+                                  paymentBadge(pm),
+                              ],
+                            ),
+                          ),
+                          trailing: Text(
+                              '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)}',
+                              style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15)),
                         ),
                       );
                     }),
@@ -1799,6 +2039,66 @@ class _OwnerScreenState extends State<OwnerScreen> {
               style: TextStyle(
                   color: color, fontWeight: FontWeight.bold, fontSize: 15)),
         ],
+      ),
+    );
+  }
+}
+
+// ==================== NOTIFICATIONS SCREEN ====================
+class NotificationsScreen extends StatelessWidget {
+  const NotificationsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.amber.shade900,
+        title: const Text('ማሳወቂያዎች'),
+      ),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: NotificationsLog.stream(),
+        builder: (ctx, snap) {
+          final items = snap.data ?? NotificationsLog.all;
+          if (items.isEmpty) {
+            return const Center(
+              child: Text('ምንም ማሳወቂያ የለም',
+                  style: TextStyle(color: Colors.white70, fontSize: 16)),
+            );
+          }
+          return ListView.builder(
+            itemCount: items.length,
+            itemBuilder: (ctx, i) {
+              final n = items[i];
+              final ts = DateTime.tryParse((n['ts'] ?? '') as String);
+              final method = (n['method'] ?? 'cash') as String;
+              final color = payColor(method);
+              return Card(
+                color: const Color(0xFF2A2A2A),
+                margin: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 4),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: color,
+                    child: Icon(payIcon(method),
+                        color: Colors.white, size: 20),
+                  ),
+                  title: Text(
+                    '${n['waiter']} — ${(n['total'] as double).toStringAsFixed(0)} ብር',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    '${payLabel(method)}${ts != null ? " • ${DateFormat('MMM d, HH:mm').format(ts)}" : ""}',
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 12),
+                  ),
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -2138,7 +2438,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                     prefs.getString('waiterName') ?? ownerInfo['name']!;
                 final timestamp = DateTime.now().toIso8601String();
                 final note = noteCtrl.text.trim();
-                // Save payment as a special "sale" row (category='payment', negative total)
                 final row = {
                   'item_id': -1,
                   'item_name': note.isNotEmpty
@@ -2188,27 +2487,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     }
   }
 
-  String _payLabel(String key) {
-    for (var p in paymentMethods) {
-      if (p['key'] == key) return p['label'] as String;
-    }
-    return key;
-  }
-
-  IconData _payIcon(String key) {
-    for (var p in paymentMethods) {
-      if (p['key'] == key) return p['icon'] as IconData;
-    }
-    return Icons.payments;
-  }
-
-  Color _payColor(String key) {
-    for (var p in paymentMethods) {
-      if (p['key'] == key) return p['color'] as Color;
-    }
-    return Colors.grey;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2249,7 +2527,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
           }
           final balance = credit - paid;
 
-          // Build history (credit sales + payment rows)
           final history = <Map<String, dynamic>>[];
           for (var s in all) {
             final cat = (s['category'] ?? '') as String;
@@ -2356,19 +2633,8 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                           color: Colors.white54,
                                           fontSize: 11),
                                     ),
-                                    if (isPayment) ...[
-                                      const SizedBox(width: 8),
-                                      Icon(_payIcon(pm),
-                                          color: _payColor(pm),
-                                          size: 14),
-                                      const SizedBox(width: 4),
-                                      Text(_payLabel(pm),
-                                          style: TextStyle(
-                                              color: _payColor(pm),
-                                              fontSize: 11,
-                                              fontWeight:
-                                                  FontWeight.bold)),
-                                    ],
+                                    const SizedBox(width: 8),
+                                    paymentBadge(pm),
                                   ],
                                 ),
                               ),
@@ -2573,103 +2839,6 @@ class _StockManageScreenState extends State<StockManageScreen> {
                   backgroundColor: Colors.green,
                   padding: const EdgeInsets.symmetric(vertical: 16)),
               onPressed: _addTo,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ==================== CHANGE PIN ====================
-class ChangePinScreen extends StatefulWidget {
-  const ChangePinScreen({super.key});
-  @override
-  State<ChangePinScreen> createState() => _ChangePinScreenState();
-}
-
-class _ChangePinScreenState extends State<ChangePinScreen> {
-  final currentCtrl = TextEditingController();
-  final newCtrl = TextEditingController();
-  final confirmCtrl = TextEditingController();
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString('ownerPin') ?? defaultPin;
-    if (currentCtrl.text != stored) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('❌ የአሁኑ ፒን ስህተት'), backgroundColor: Colors.red));
-      return;
-    }
-    if (newCtrl.text.length != 4) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('አዲስ ፒን 4 ቁጥር መሆን አለበት'),
-          backgroundColor: Colors.orange));
-      return;
-    }
-    if (newCtrl.text != confirmCtrl.text) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('አዲስ ፒን አይመሳሰልም'),
-          backgroundColor: Colors.orange));
-      return;
-    }
-    await prefs.setString('ownerPin', newCtrl.text);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('✅ ፒን ተቀይሯል'), backgroundColor: Colors.green));
-    Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-          backgroundColor: Colors.amber.shade900,
-          title: const Text('ፒን ቀይር')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            TextField(
-                controller: currentCtrl,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                style: const TextStyle(color: Colors.white, fontSize: 24),
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                    labelText: 'የአሁኑ ፒን',
-                    labelStyle: TextStyle(color: Colors.amber))),
-            TextField(
-                controller: newCtrl,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                style: const TextStyle(color: Colors.white, fontSize: 24),
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                    labelText: 'አዲስ ፒን',
-                    labelStyle: TextStyle(color: Colors.amber))),
-            TextField(
-                controller: confirmCtrl,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                style: const TextStyle(color: Colors.white, fontSize: 24),
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                    labelText: 'አዲስ ፒን ደግመህ',
-                    labelStyle: TextStyle(color: Colors.amber))),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.save),
-              label: const Text('አስቀምጥ'),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amber,
-                  foregroundColor: Colors.black,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 30, vertical: 14)),
-              onPressed: _save,
             ),
           ],
         ),
@@ -2892,7 +3061,11 @@ class WeeklyReportScreen extends StatelessWidget {
               'date': d,
               'total': 0.0,
               'qty': 0,
-              'count': 0
+              'count': 0,
+              'cash': 0.0,
+              'cbe': 0.0,
+              'tele': 0.0,
+              'credit': 0.0,
             };
           }
           for (var s in sales) {
@@ -2900,11 +3073,22 @@ class WeeklyReportScreen extends StatelessWidget {
             if (ts == null) continue;
             final key = DateFormat('yyyy-MM-dd').format(ts);
             if (byDay.containsKey(key)) {
-              byDay[key]!['total'] = (byDay[key]!['total'] as double) +
-                  ((s['total_price'] ?? 0) as num).toDouble();
+              final amt = ((s['total_price'] ?? 0) as num).toDouble();
+              final pm = (s['payment_method'] ?? 'cash') as String;
+              byDay[key]!['total'] = (byDay[key]!['total'] as double) + amt;
               byDay[key]!['qty'] =
                   (byDay[key]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
               byDay[key]!['count'] = (byDay[key]!['count'] as int) + 1;
+              if (pm == 'cbe') {
+                byDay[key]!['cbe'] = (byDay[key]!['cbe'] as double) + amt;
+              } else if (pm == 'telebirr') {
+                byDay[key]!['tele'] = (byDay[key]!['tele'] as double) + amt;
+              } else if (pm == 'credit') {
+                byDay[key]!['credit'] =
+                    (byDay[key]!['credit'] as double) + amt;
+              } else {
+                byDay[key]!['cash'] = (byDay[key]!['cash'] as double) + amt;
+              }
             }
           }
 
@@ -2948,20 +3132,54 @@ class WeeklyReportScreen extends StatelessWidget {
                       ? Colors.amber.shade900.withOpacity(0.3)
                       : const Color(0xFF2A2A2A),
                   margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    title: Text(dayLabel,
-                        style: TextStyle(
-                            color: isToday ? Colors.amber : Colors.white,
-                            fontWeight: FontWeight.bold)),
-                    subtitle: Text('${d['count']} ሽያጭ • ${d['qty']} ዕቃ',
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12)),
-                    trailing: Text(
-                        '${(d['total'] as double).toStringAsFixed(0)} ብር',
-                        style: const TextStyle(
-                            color: Colors.amber,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(dayLabel,
+                                style: TextStyle(
+                                    color: isToday
+                                        ? Colors.amber
+                                        : Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15)),
+                            const Spacer(),
+                            Text(
+                                '${(d['total'] as double).toStringAsFixed(0)} ብር',
+                                style: const TextStyle(
+                                    color: Colors.amber,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text('${d['count']} ሽያጭ • ${d['qty']} ዕቃ',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 11)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            if ((d['cash'] as double) > 0)
+                              _miniBadge('ጥሬ',
+                                  d['cash'] as double, Colors.green),
+                            if ((d['cbe'] as double) > 0)
+                              _miniBadge('CBE', d['cbe'] as double,
+                                  Colors.purple),
+                            if ((d['tele'] as double) > 0)
+                              _miniBadge('ቴሌ', d['tele'] as double,
+                                  Colors.lightBlue),
+                            if ((d['credit'] as double) > 0)
+                              _miniBadge('ዱቤ', d['credit'] as double,
+                                  Colors.orange),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 );
               }),
@@ -2969,6 +3187,20 @@ class WeeklyReportScreen extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+
+  Widget _miniBadge(String label, double amount, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color, width: 1),
+      ),
+      child: Text('$label ${amount.toStringAsFixed(0)}',
+          style: TextStyle(
+              color: color, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 }
@@ -3375,6 +3607,8 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                 itemBuilder: (ctx3, i) {
                   final it = items[i];
                   final sw = (it['served_with'] ?? '') as String;
+                  final pm =
+                      (it['payment_method'] ?? 'cash') as String;
                   return Card(
                     color: const Color(0xFF2A2A2A),
                     margin: const EdgeInsets.symmetric(
@@ -3383,30 +3617,36 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                       title: Text('${it['item_name']}',
                           style:
                               const TextStyle(color: Colors.white)),
-                      subtitle: Row(
-                        children: [
-                          Text(
-                              '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
-                              style: const TextStyle(
-                                  color: Colors.white54, fontSize: 12)),
-                          if (sw.isNotEmpty) ...[
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(
+                          children: [
+                            Text(
+                                '${it['waiter']} • ${(it['unit_price'] as num).toStringAsFixed(0)} ብር/ዕቃ',
+                                style: const TextStyle(
+                                    color: Colors.white54, fontSize: 12)),
                             const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: sw == 'እንጀራ'
-                                    ? Colors.amber.shade900.withOpacity(0.4)
-                                    : Colors.brown.withOpacity(0.4),
-                                borderRadius: BorderRadius.circular(3),
+                            paymentBadge(pm),
+                            if (sw.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: sw == 'እንጀራ'
+                                      ? Colors.amber.shade900
+                                          .withOpacity(0.4)
+                                      : Colors.brown.withOpacity(0.4),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text('በ$sw',
+                                    style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 10)),
                               ),
-                              child: Text('በ$sw',
-                                  style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 10)),
-                            ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -3829,6 +4069,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   itemBuilder: (ctx, i) {
                     final s = sales[i];
                     final ts = DateTime.parse(s['timestamp'] as String);
+                    final pm =
+                        (s['payment_method'] ?? 'cash') as String;
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -3838,10 +4080,37 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         title: Text(
                             '${s['item_name']} × ${s['quantity']}',
                             style: const TextStyle(color: Colors.white)),
-                        subtitle: Text(
-                            '${s['customer'] ?? ""} • ${DateFormat('MMM d, HH:mm').format(ts)}',
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 12)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Text(
+                                  '${s['customer'] ?? ""} • ${DateFormat('MMM d, HH:mm').format(ts)}',
+                                  style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11)),
+                              const SizedBox(width: 8),
+                              if ((s['is_credit'] ?? 0) == 1)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: Colors.orange, width: 1),
+                                  ),
+                                  child: const Text('ዱቤ',
+                                      style: TextStyle(
+                                          color: Colors.orange,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
+                                )
+                              else
+                                paymentBadge(pm),
+                            ],
+                          ),
+                        ),
                         trailing: Text(
                             '${(s['total_price'] as num).toStringAsFixed(0)} ብር',
                             style: const TextStyle(
@@ -3938,6 +4207,8 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
                     final s = sales[i];
                     final ts = DateTime.tryParse(
                         (s['timestamp'] ?? '') as String);
+                    final pm =
+                        (s['payment_method'] ?? 'cash') as String;
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -3946,10 +4217,37 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
                         title: Text(
                             '${s['item_name']} × ${s['quantity']}',
                             style: const TextStyle(color: Colors.white)),
-                        subtitle: Text(
-                            '${s['customer'] ?? ""} • ${ts != null ? DateFormat('HH:mm').format(ts) : ""}',
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 12)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Text(
+                                  '${s['customer'] ?? ""} • ${ts != null ? DateFormat('HH:mm').format(ts) : ""}',
+                                  style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11)),
+                              const SizedBox(width: 8),
+                              if ((s['is_credit'] ?? 0) == 1)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: Colors.orange, width: 1),
+                                  ),
+                                  child: const Text('ዱቤ',
+                                      style: TextStyle(
+                                          color: Colors.orange,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
+                                )
+                              else
+                                paymentBadge(pm),
+                            ],
+                          ),
+                        ),
                         trailing: Text(
                             '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
                             style: const TextStyle(
@@ -4093,13 +4391,42 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
           ...summary.map((s) {
             final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            final pm = (s['payment_method'] ?? 'cash') as String;
             return ListTile(
               title: Text('${s['item_name']} × ${s['quantity']}',
                   style: const TextStyle(color: Colors.white)),
-              subtitle: Text(
-                  ts != null ? DateFormat('MMM d, HH:mm').format(ts) : '',
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 12)),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    Text(
+                        ts != null
+                            ? DateFormat('MMM d, HH:mm').format(ts)
+                            : '',
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 11)),
+                    const SizedBox(width: 8),
+                    if ((s['is_credit'] ?? 0) == 1)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                              color: Colors.orange, width: 1),
+                        ),
+                        child: const Text('ዱቤ',
+                            style: TextStyle(
+                                color: Colors.orange,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold)),
+                      )
+                    else
+                      paymentBadge(pm),
+                  ],
+                ),
+              ),
               trailing: Text(
                   '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
                   style: const TextStyle(
