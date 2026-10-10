@@ -895,15 +895,11 @@ class NotificationsLog {
 }
 
 // ==================== HELPERS ====================
-/// Compute credit ledger and mark paid status for sales.
-/// Returns map: customer -> {credit, paid, balance, ...}
-/// Also returns per-sale paid status map: saleId -> isPaid
 Map<String, dynamic> computeCreditAndPaidStatus(
     List<Map<String, dynamic>> rows) {
   final ledger = <String, Map<String, dynamic>>{};
   final paidSaleIds = <String>{};
 
-  // Collect credit sales per customer ordered by time
   final salesByCustomer = <String, List<Map<String, dynamic>>>{};
   for (var s in rows) {
     if ((s['voided'] ?? 0) == 1) continue;
@@ -915,7 +911,6 @@ Map<String, dynamic> computeCreditAndPaidStatus(
     salesByCustomer.putIfAbsent(c, () => []).add(s);
   }
 
-  // Collect payments per customer
   final paymentsByCustomer = <String, List<Map<String, dynamic>>>{};
   for (var s in rows) {
     if ((s['voided'] ?? 0) == 1) continue;
@@ -926,7 +921,6 @@ Map<String, dynamic> computeCreditAndPaidStatus(
     paymentsByCustomer.putIfAbsent(c, () => []).add(s);
   }
 
-  // Build ledger + determine paid status
   for (var c in salesByCustomer.keys) {
     final cSales = List<Map<String, dynamic>>.from(salesByCustomer[c]!);
     cSales.sort((a, b) =>
@@ -940,19 +934,16 @@ Map<String, dynamic> computeCreditAndPaidStatus(
 
     double totalPaid = 0;
     for (var p in (paymentsByCustomer[c] ?? [])) {
-      totalPaid += ((p['total_price'] ?? 0) as num).doubleValue.abs();
+      totalPaid += ((p['total_price'] ?? 0) as num).toDouble().abs();
     }
 
-    // FIFO: apply payments to oldest unpaid sales
     double remainingPaid = totalPaid;
     for (var s in cSales) {
       final amt = ((s['total_price'] ?? 0) as num).toDouble();
       if (remainingPaid >= amt - 0.01) {
-        // Full payment for this sale
         paidSaleIds.add(s['id'].toString());
         remainingPaid -= amt;
       } else if (remainingPaid > 0.01) {
-        // Partial payment — mark as not fully paid
         remainingPaid = 0;
       }
     }
@@ -1086,9 +1077,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final wasPayment = paymentMethod;
     final enjDeduct = enjeraCount;
     final brdDeduct = breadCount;
-    final w2 = water2L;
-    final w1 = water1L;
-    final w05 = water05L;
     final timestamp = DateTime.now().toIso8601String();
 
     final localIds = <int, Map<String, dynamic>>{};
@@ -1653,14 +1641,12 @@ class _OwnerScreenState extends State<OwnerScreen> {
   }
 
   Future<void> _alert() async {
-    // Strong alert using system sound + haptic
     try {
       await SystemSound.play(SystemSoundType.alert);
     } catch (_) {}
     try {
       HapticFeedback.heavyImpact();
     } catch (_) {}
-    // Play a second time for emphasis
     await Future.delayed(const Duration(milliseconds: 150));
     try {
       await SystemSound.play(SystemSoundType.click);
@@ -1871,7 +1857,6 @@ class _OwnerScreenState extends State<OwnerScreen> {
                 final todayStart = DateTime(now.year, now.month, now.day);
                 final all = snap.data!;
 
-                // Get paid status from credit ledger
                 final statusData = computeCreditAndPaidStatus(all);
                 final paidSaleIds =
                     (statusData['paidSaleIds'] as Set).cast<String>();
@@ -4156,7 +4141,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     sales =
         all.where((s) => (s['waiter'] ?? '') == waiterName).toList();
 
-    // Get paid status from Firestore
     try {
       final snap = await FirebaseFirestore.instance
           .collection('sales')
