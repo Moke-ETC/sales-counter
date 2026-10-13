@@ -66,14 +66,18 @@ String payLabel(String key) {
   }
   return key;
 }
-
+String payShort(String key) {
+  for (var p in paymentMethods) {
+    if (p['key'] == key) return p['short'] as String;
+  }
+  return key;
+}
 IconData payIcon(String key) {
   for (var p in paymentMethods) {
     if (p['key'] == key) return p['icon'] as IconData;
   }
   return Icons.payments;
 }
-
 Color payColor(String key) {
   for (var p in paymentMethods) {
     if (p['key'] == key) return p['color'] as Color;
@@ -827,7 +831,7 @@ class Inventory {
   }
 }
 
-// ==================== NOTIFICATIONS LOG ====================
+// ==================== NOTIFICATIONS ====================
 class NotificationsLog {
   static final _controller =
       StreamController<List<Map<String, dynamic>>>.broadcast();
@@ -1630,6 +1634,150 @@ Widget creditBadge() {
       ],
     ),
   );
+}
+
+// ==================== WAITER CLOUD HISTORY (ሽያጮቼ) ====================
+class WaiterHistoryScreen extends StatefulWidget {
+  const WaiterHistoryScreen({super.key});
+  @override
+  State<WaiterHistoryScreen> createState() => _WaiterHistoryScreenState();
+}
+
+class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
+  String waiter = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => waiter = prefs.getString('waiterName') ?? '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (waiter.isEmpty) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      appBar: AppBar(
+          backgroundColor: Colors.amber.shade900,
+          title: Text('$waiter — ሽያጮቼ')),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: Cloud.allSalesStream(),
+        builder: (ctx, snap) {
+          if (snap.hasError) {
+            return Center(
+                child: Text('ስህተት: ${snap.error}',
+                    style: const TextStyle(color: Colors.red)));
+          }
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final allRows = snap.data!;
+          final statusData = computeCreditAndPaidStatus(allRows);
+          final paidSaleMethods = (statusData['paidSaleMethods'] as Map)
+              .cast<String, String>();
+
+          final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+          final sales = allRows
+              .where((s) =>
+                  s['waiter'] == waiter &&
+                  (s['category'] ?? '') != 'payment' &&
+                  (s['voided'] ?? 0) != 1)
+              .where((s) {
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ts != null && ts.isAfter(todayStart);
+          }).toList();
+
+          if (sales.isEmpty) {
+            return const Center(
+                child: Text('ምንም ሽያጭ የለም',
+                    style: TextStyle(color: Colors.white70)));
+          }
+          double total = 0;
+          for (var s in sales) {
+            total += ((s['total_price'] ?? 0) as num).toDouble();
+          }
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                color: Colors.amber.shade900.withOpacity(0.3),
+                child: Column(
+                  children: [
+                    Text('${total.toStringAsFixed(0)} ብር',
+                        style: const TextStyle(
+                            color: Colors.amber,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold)),
+                    Text('${sales.length} ሽያጭ',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: sales.length,
+                  itemBuilder: (ctx, i) {
+                    final s = sales[i];
+                    final ts = DateTime.tryParse(
+                        (s['timestamp'] ?? '') as String);
+                    final pm =
+                        (s['payment_method'] ?? 'cash') as String;
+                    final isCredit = (s['is_credit'] ?? 0) == 1;
+                    final paidWith = paidSaleMethods[s['id'].toString()];
+                    return Card(
+                      color: const Color(0xFF2A2A2A),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      child: ListTile(
+                        title: Text(
+                            '${s['item_name']} × ${s['quantity']}',
+                            style: const TextStyle(color: Colors.white)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              Text(
+                                  '${s['customer'] ?? ""} • ${ts != null ? DateFormat('HH:mm').format(ts) : ""}',
+                                  style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11)),
+                              if (isCredit && paidWith != null)
+                                paidBadge(paidWith)
+                              else if (isCredit)
+                                creditBadge()
+                              else
+                                paymentBadge(pm),
+                            ],
+                          ),
+                        ),
+                        trailing: Text(
+                            '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)} ብር',
+                            style: const TextStyle(
+                                color: Colors.amber,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 // ==================== OWNER SCREEN ====================
@@ -3369,7 +3517,7 @@ class WeeklyReportScreen extends StatelessWidget {
   }
 }
 
-// ==================== ORDERS SCREEN (ዛሬ ትዕዛዞች) ====================
+// ==================== ORDERS ====================
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
   @override
@@ -3884,8 +4032,8 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                                   IconButton(
                                     icon: const Icon(Icons.remove_circle,
                                         color: Colors.redAccent, size: 26),
-                                    onPressed: () => _changeQty(
-                                        saleId, itemQty - 1),
+                                    onPressed: () =>
+                                        _changeQty(saleId, itemQty - 1),
                                   ),
                                   SizedBox(
                                     width: 30,
@@ -3899,8 +4047,8 @@ class _CustomerEditorSheetState extends State<_CustomerEditorSheet> {
                                   IconButton(
                                     icon: const Icon(Icons.add_circle,
                                         color: Colors.greenAccent, size: 26),
-                                    onPressed: () => _changeQty(
-                                        saleId, itemQty + 1),
+                                    onPressed: () =>
+                                        _changeQty(saleId, itemQty + 1),
                                   ),
                                   const SizedBox(width: 4),
                                   Text('${lineTotal.toStringAsFixed(0)}',
@@ -4417,169 +4565,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   color: color, fontWeight: FontWeight.bold, fontSize: 15)),
         ],
       ),
-    );
-  }
-}
-
-// ==================== WAITER HISTORY (Cloud only — own sales) ====================
-class WaiterHistoryScreen extends StatefulWidget {
-  const WaiterHistoryScreen({super.key});
-  @override
-  State<WaiterHistoryScreen> createState() => _WaiterHistoryScreenState();
-}
-
-class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
-  String waiterName = '';
-  bool loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final prefs = await SharedPreferences.getInstance();
-    waiterName = prefs.getString('waiterName') ?? '';
-    if (mounted) setState(() => loading = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.amber.shade900,
-        title: Text('ሽያጮቼ — $waiterName'),
-      ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : StreamBuilder<List<Map<String, dynamic>>>(
-              stream: Cloud.allSalesStream(),
-              builder: (ctx, snap) {
-                if (snap.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text('ስህተት: ${snap.error}',
-                          style: const TextStyle(color: Colors.red)),
-                    ),
-                  );
-                }
-                if (!snap.hasData) {
-                  return const Center(
-                      child: CircularProgressIndicator(color: Colors.amber));
-                }
-                final now = DateTime.now();
-                final todayStart = DateTime(now.year, now.month, now.day);
-                final sales = snap.data!.where((s) {
-                  if ((s['category'] ?? '') == 'payment') return false;
-                  if ((s['waiter'] ?? '') != waiterName) return false;
-                  final ts =
-                      DateTime.tryParse((s['timestamp'] ?? '') as String);
-                  return ts != null && ts.isAfter(todayStart);
-                }).toList();
-
-                sales.sort((a, b) =>
-                    ((b['timestamp'] ?? '') as String)
-                        .compareTo((a['timestamp'] ?? '') as String));
-
-                double total = 0;
-                int qty = 0;
-                for (var s in sales) {
-                  total += ((s['total_price'] ?? 0) as num).toDouble();
-                  qty += (s['quantity'] ?? 0) as int;
-                }
-
-                return Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      color: Colors.amber.shade900.withOpacity(0.3),
-                      width: double.infinity,
-                      child: Column(
-                        children: [
-                          const Text('የዛሬ ሽያጮቼ',
-                              style: TextStyle(
-                                  color: Colors.white70, fontSize: 13)),
-                          const SizedBox(height: 4),
-                          Text('${total.toStringAsFixed(0)} ብር',
-                              style: const TextStyle(
-                                  color: Colors.amber,
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold)),
-                          Text('$qty ዕቃ • ${sales.length} ሽያጭ',
-                              style: const TextStyle(
-                                  color: Colors.white70, fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: sales.isEmpty
-                          ? const Center(
-                              child: Text('ዛሬ ምንም ሽያጭ የለም',
-                                  style: TextStyle(
-                                      color: Colors.white70)))
-                          : ListView.builder(
-                              itemCount: sales.length,
-                              itemBuilder: (ctx, i) {
-                                final s = sales[i];
-                                final ts = DateTime.tryParse(
-                                    (s['timestamp'] ?? '') as String);
-                                final pm = (s['payment_method'] ??
-                                    'cash') as String;
-                                final isCredit =
-                                    (s['is_credit'] ?? 0) == 1;
-                                return Card(
-                                  color: const Color(0xFF2A2A2A),
-                                  margin: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 3),
-                                  child: ListTile(
-                                    title: Text(
-                                        '${s['item_name']} × ${s['quantity']}',
-                                        style: const TextStyle(
-                                            color: Colors.white)),
-                                    subtitle: Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Wrap(
-                                        spacing: 6,
-                                        runSpacing: 4,
-                                        children: [
-                                          Text(
-                                              ts != null
-                                                  ? DateFormat(
-                                                          'MMM d, HH:mm')
-                                                      .format(ts)
-                                                  : '',
-                                              style: const TextStyle(
-                                                  color: Colors.white54,
-                                                  fontSize: 11)),
-                                          if (isCredit)
-                                            creditBadge()
-                                          else
-                                            paymentBadge(pm),
-                                          if ((s['customer'] ?? '') != '')
-                                            Text('👤 ${s['customer']}',
-                                                style: const TextStyle(
-                                                    color: Colors
-                                                        .lightBlueAccent,
-                                                    fontSize: 11)),
-                                        ],
-                                      ),
-                                    ),
-                                    trailing: Text(
-                                        '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)}',
-                                        style: const TextStyle(
-                                            color: Colors.amber,
-                                            fontWeight: FontWeight.bold)),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                );
-              },
-            ),
     );
   }
 }
