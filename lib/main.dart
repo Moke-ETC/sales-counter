@@ -4298,7 +4298,7 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 }
 
-// ==================== HISTORY SCREEN (Local) ====================
+// ==================== HISTORY SCREEN (Cloud-aware) ====================
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
   @override
@@ -4306,19 +4306,18 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  List<Map<String, dynamic>> sales = [];
-  bool loading = true;
+  String waiter = '';
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _init();
   }
 
-  Future<void> _load() async {
-    setState(() => loading = true);
-    sales = await DB.getAllSales();
-    if (mounted) setState(() => loading = false);
+  Future<void> _init() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => waiter = prefs.getString('waiterName') ?? '');
   }
 
   @override
@@ -4327,17 +4326,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
       appBar: AppBar(
         backgroundColor: Colors.amber.shade900,
         title: const Text('የሽያጭ ታሪክ'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-        ],
       ),
-      body: loading
+      body: waiter.isEmpty
           ? const Center(child: CircularProgressIndicator())
-          : sales.isEmpty
-              ? const Center(
-                  child: Text('ምንም ሽያጭ የለም',
-                      style: TextStyle(color: Colors.white70)))
-              : ListView.builder(
+          : StreamBuilder<List<Map<String, dynamic>>>(
+              stream: Cloud.allSalesStream(),
+              builder: (ctx, snap) {
+                if (snap.hasError) {
+                  return Center(
+                      child: Text('ስህተት: ${snap.error}',
+                          style: const TextStyle(color: Colors.red)));
+                }
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final allRows = snap.data!;
+                final statusData = computeCreditAndPaidStatus(allRows);
+                final paidSaleMethods = (statusData['paidSaleMethods'] as Map)
+                    .cast<String, String>();
+
+                final sales = allRows
+                    .where((s) =>
+                        s['waiter'] == waiter &&
+                        (s['category'] ?? '') != 'payment' &&
+                        (s['voided'] ?? 0) != 1)
+                    .toList();
+
+                sales.sort((a, b) =>
+                    ((b['timestamp'] ?? '') as String)
+                        .compareTo((a['timestamp'] ?? '') as String));
+
+                if (sales.isEmpty) {
+                  return const Center(
+                      child: Text('ምንም ሽያጭ የለም',
+                          style: TextStyle(color: Colors.white70)));
+                }
+
+                return ListView.builder(
                   itemCount: sales.length,
                   itemBuilder: (ctx, i) {
                     final s = sales[i];
@@ -4345,6 +4371,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         DateTime.tryParse((s['timestamp'] ?? '') as String);
                     final pm = (s['payment_method'] ?? 'cash') as String;
                     final isCredit = (s['is_credit'] ?? 0) == 1;
+                    final paidWith = paidSaleMethods[s['id'].toString()];
+
+                    // ✅ Choose the correct badge based on the actual state
+                    Widget badge;
+                    if (isCredit && paidWith != null) {
+                      badge = paidBadge(paidWith);
+                    } else if (isCredit) {
+                      badge = creditBadge();
+                    } else {
+                      badge = paymentBadge(pm);
+                    }
+
                     return Card(
                       color: const Color(0xFF2A2A2A),
                       margin: const EdgeInsets.symmetric(
@@ -4353,8 +4391,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         dense: true,
                         title: Text(
                             '${s['item_name']} × ${s['quantity']}',
-                            style:
-                                const TextStyle(color: Colors.white)),
+                            style: const TextStyle(color: Colors.white)),
                         subtitle: Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Wrap(
@@ -4362,11 +4399,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             runSpacing: 4,
                             children: [
                               Text(
-                                  '${s['waiter']} • ${ts != null ? DateFormat('MMM d, HH:mm').format(ts) : ""}',
+                                  ts != null
+                                      ? DateFormat('MMM d, HH:mm').format(ts)
+                                      : '',
                                   style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 11)),
-                              if (isCredit) creditBadge() else paymentBadge(pm),
+                                      color: Colors.white54, fontSize: 11)),
+                              badge,
                               if ((s['customer'] ?? '') != '')
                                 Text('👤 ${s['customer']}',
                                     style: const TextStyle(
@@ -4383,169 +4421,178 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ),
                     );
                   },
-                ),
+                );
+              },
+            ),
     );
   }
 }
 
-// ==================== REPORTS (Local today) ====================
-class ReportsScreen extends StatefulWidget {
+// ==================== REPORTS (Cloud-aware) ====================
+class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key});
-  @override
-  State<ReportsScreen> createState() => _ReportsScreenState();
-}
-
-class _ReportsScreenState extends State<ReportsScreen> {
-  List<Map<String, dynamic>> sales = [];
-  bool loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => loading = true);
-    sales = await DB.getAllSales();
-    if (mounted) setState(() => loading = false);
-  }
 
   @override
   Widget build(BuildContext context) {
-    if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-    final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
-
-    final today = sales.where((s) {
-      final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
-      return ts != null && ts.isAfter(todayStart);
-    }).toList();
-
-    final byWaiter = <String, Map<String, dynamic>>{};
-    double grand = 0;
-    int grandQty = 0;
-    double cash = 0, cbe = 0, tele = 0, credit = 0;
-
-    for (var s in today) {
-      final w = (s['waiter'] ?? 'unknown') as String;
-      byWaiter.putIfAbsent(w, () => {'qty': 0, 'total': 0.0, 'count': 0});
-      byWaiter[w]!['qty'] =
-          (byWaiter[w]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
-      byWaiter[w]!['total'] = (byWaiter[w]!['total'] as double) +
-          ((s['total_price'] ?? 0) as num).toDouble();
-      byWaiter[w]!['count'] = (byWaiter[w]!['count'] as int) + 1;
-
-      final amt = ((s['total_price'] ?? 0) as num).toDouble();
-      grand += amt;
-      grandQty += (s['quantity'] ?? 0) as int;
-      final pm = (s['payment_method'] ?? 'cash') as String;
-      if (pm == 'cbe') {
-        cbe += amt;
-      } else if (pm == 'telebirr') {
-        tele += amt;
-      } else if (pm == 'credit') {
-        credit += amt;
-      } else {
-        cash += amt;
-      }
-    }
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.amber.shade900,
         title: const Text('ሪፖርት (ዛሬ)'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load)
-        ],
       ),
-      body: ListView(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            color: Colors.amber.shade900.withOpacity(0.3),
-            child: Column(
-              children: [
-                const Text('የዛሬ ጠቅላላ',
-                    style: TextStyle(color: Colors.white70, fontSize: 14)),
-                const SizedBox(height: 6),
-                Text('${grand.toStringAsFixed(0)} ብር',
-                    style: const TextStyle(
-                        color: Colors.amber,
-                        fontSize: 34,
-                        fontWeight: FontWeight.bold)),
-                Text('$grandQty ዕቃ • ${today.length} ሽያጭ',
-                    style: const TextStyle(
-                        color: Colors.white70, fontSize: 13)),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(14),
-            color: const Color(0xFF1F1F1F),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('በክፍያ ዘዴ:',
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: Cloud.allSalesStream(),
+        builder: (ctx, snap) {
+          if (snap.hasError) {
+            return Center(
+                child: Text('ስህተት: ${snap.error}',
+                    style: const TextStyle(color: Colors.red)));
+          }
+          if (!snap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final all = snap.data!;
+          final statusData = computeCreditAndPaidStatus(all);
+          final paidSaleMethods = (statusData['paidSaleMethods'] as Map)
+              .cast<String, String>();
+
+          final now = DateTime.now();
+          final todayStart = DateTime(now.year, now.month, now.day);
+
+          final today = all.where((s) {
+            if ((s['category'] ?? '') == 'payment') return false;
+            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+            return ts != null && ts.isAfter(todayStart);
+          }).toList();
+
+          final byWaiter = <String, Map<String, dynamic>>{};
+          double grand = 0;
+          int grandQty = 0;
+          double cash = 0, cbe = 0, tele = 0, credit = 0;
+
+          for (var s in today) {
+            final w = (s['waiter'] ?? 'unknown') as String;
+            byWaiter.putIfAbsent(
+                w, () => {'qty': 0, 'total': 0.0, 'count': 0});
+            byWaiter[w]!['qty'] =
+                (byWaiter[w]!['qty'] as int) + ((s['quantity'] ?? 0) as int);
+            byWaiter[w]!['total'] = (byWaiter[w]!['total'] as double) +
+                ((s['total_price'] ?? 0) as num).toDouble();
+            byWaiter[w]!['count'] = (byWaiter[w]!['count'] as int) + 1;
+
+            final amt = ((s['total_price'] ?? 0) as num).toDouble();
+            grand += amt;
+            grandQty += (s['quantity'] ?? 0) as int;
+
+            final pm = (s['payment_method'] ?? 'cash') as String;
+            final isCredit = (s['is_credit'] ?? 0) == 1;
+            final paidWith = paidSaleMethods[s['id'].toString()];
+
+            // ✅ If a credit has been paid, bucket it under the real
+            // payment method instead of "credit"
+            final effective = (isCredit && paidWith != null) ? paidWith : pm;
+
+            if (effective == 'cbe') {
+              cbe += amt;
+            } else if (effective == 'telebirr') {
+              tele += amt;
+            } else if (effective == 'credit') {
+              credit += amt;
+            } else {
+              cash += amt;
+            }
+          }
+
+          return ListView(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                color: Colors.amber.shade900.withOpacity(0.3),
+                child: Column(
+                  children: [
+                    const Text('የዛሬ ጠቅላላ',
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 14)),
+                    const SizedBox(height: 6),
+                    Text('${grand.toStringAsFixed(0)} ብር',
+                        style: const TextStyle(
+                            color: Colors.amber,
+                            fontSize: 34,
+                            fontWeight: FontWeight.bold)),
+                    Text('$grandQty ዕቃ • ${today.length} ሽያጭ',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(14),
+                color: const Color(0xFF1F1F1F),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('በክፍያ ዘዴ:',
+                        style: TextStyle(
+                            color: Colors.amber,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    _payRow(Icons.payments, 'ጥሬ ገንዘብ', cash, Colors.green),
+                    _payRow(Icons.account_balance, 'CBE', cbe, Colors.purple),
+                    _payRow(Icons.phone_android, 'ቴሌብር', tele,
+                        Colors.lightBlue),
+                    _payRow(Icons.credit_card, 'ቀሪ ዱቤ', credit,
+                        Colors.orange),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text('በአስተናጋጅ:',
                     style: TextStyle(
                         color: Colors.amber,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                _payRow(Icons.payments, 'ጥሬ ገንዘብ', cash, Colors.green),
-                _payRow(Icons.account_balance, 'CBE', cbe, Colors.purple),
-                _payRow(Icons.phone_android, 'ቴሌብር', tele,
-                    Colors.lightBlue),
-                _payRow(Icons.credit_card, 'ዱቤ', credit, Colors.orange),
-              ],
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text('በአስተናጋጅ:',
-                style: TextStyle(
-                    color: Colors.amber,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
-          ),
-          if (byWaiter.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: Text('ምንም ሽያጭ የለም',
-                    style: TextStyle(color: Colors.white70)),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16)),
               ),
-            ),
-          ...byWaiter.entries.map((e) => Card(
-                color: const Color(0xFF2A2A2A),
-                margin: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 4),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.amber.shade900,
-                    child: Text(
-                        e.key.isEmpty ? '?' : e.key.substring(0, 1),
-                        style: const TextStyle(
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold)),
+              if (byWaiter.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(
+                    child: Text('ምንም ሽያጭ የለም',
+                        style: TextStyle(color: Colors.white70)),
                   ),
-                  title: Text(e.key,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold)),
-                  subtitle: Text(
-                      '${e.value['count']} ሽያጭ • ${e.value['qty']} ዕቃ',
-                      style: const TextStyle(color: Colors.white60)),
-                  trailing: Text(
-                      '${(e.value['total'] as double).toStringAsFixed(0)} ብር',
-                      style: const TextStyle(
-                          color: Colors.amber,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16)),
                 ),
-              )),
-        ],
+              ...byWaiter.entries.map((e) => Card(
+                    color: const Color(0xFF2A2A2A),
+                    margin: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.amber.shade900,
+                        child: Text(
+                            e.key.isEmpty ? '?' : e.key.substring(0, 1),
+                            style: const TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                      title: Text(e.key,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
+                      subtitle: Text(
+                          '${e.value['count']} ሽያጭ • ${e.value['qty']} ዕቃ',
+                          style:
+                              const TextStyle(color: Colors.white60)),
+                      trailing: Text(
+                          '${(e.value['total'] as double).toStringAsFixed(0)} ብር',
+                          style: const TextStyle(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16)),
+                    ),
+                  )),
+            ],
+          );
+        },
       ),
     );
   }
