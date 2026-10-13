@@ -4298,7 +4298,7 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 }
 
-// ==================== HISTORY SCREEN (Cloud-aware) ====================
+// ==================== HISTORY SCREEN (Cloud-aware + delete) ====================
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
   @override
@@ -4320,12 +4320,53 @@ class _HistoryScreenState extends State<HistoryScreen> {
     setState(() => waiter = prefs.getString('waiterName') ?? '');
   }
 
+  Future<void> _deleteSale(Map<String, dynamic> sale) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title:
+            const Text('ማረጋገጫ', style: TextStyle(color: Colors.amber)),
+        content: Text(
+            '${sale['item_name']} × ${sale['quantity']} ይሰረዝ?',
+            style: const TextStyle(color: Colors.white)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('አይ')),
+          ElevatedButton(
+              style:
+                  ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('አዎ')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final fsId = sale['id'] as String?;
+    if (fsId != null && fsId.isNotEmpty) {
+      try {
+        await Cloud.voidSale(fsId);
+      } catch (_) {}
+      try {
+        final db = await DB.database;
+        await db.delete('sales',
+            where: 'firestore_id = ?', whereArgs: [fsId]);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('✅ ተሰርዟል'), backgroundColor: Colors.green));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.amber.shade900,
-        title: const Text('የሽያጭ ታሪክ'),
+        title: Text(
+            'የሽያጭ ታሪክ${waiter.isEmpty ? "" : " — $waiter"}'),
       ),
       body: waiter.isEmpty
           ? const Center(child: CircularProgressIndicator())
@@ -4373,7 +4414,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     final isCredit = (s['is_credit'] ?? 0) == 1;
                     final paidWith = paidSaleMethods[s['id'].toString()];
 
-                    // ✅ Choose the correct badge based on the actual state
                     Widget badge;
                     if (isCredit && paidWith != null) {
                       badge = paidBadge(paidWith);
@@ -4413,11 +4453,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             ],
                           ),
                         ),
-                        trailing: Text(
-                            '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)}',
-                            style: const TextStyle(
-                                color: Colors.amber,
-                                fontWeight: FontWeight.bold)),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                                '${((s['total_price'] ?? 0) as num).toStringAsFixed(0)}',
+                                style: const TextStyle(
+                                    color: Colors.amber,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 2),
+                            IconButton(
+                              icon: const Icon(Icons.delete,
+                                  color: Colors.redAccent, size: 22),
+                              tooltip: 'ሰርዝ',
+                              onPressed: () => _deleteSale(s),
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   },
@@ -4428,9 +4480,140 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
-// ==================== REPORTS (Cloud-aware) ====================
+// ==================== REPORTS (Cloud-aware + CSV export) ====================
 class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key});
+
+  Future<void> _exportCsv(BuildContext context) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('sales')
+          .get()
+          .timeout(const Duration(seconds: 10));
+      if (snap.docs.isEmpty) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('ምንም ሽያጭ የለም'),
+            backgroundColor: Colors.orange));
+        return;
+      }
+
+      final all = snap.docs.map((d) => {...d.data(), 'id': d.id}).toList();
+      final statusData = computeCreditAndPaidStatus(all);
+      final paidSaleMethods = (statusData['paidSaleMethods'] as Map)
+          .cast<String, String>();
+
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final today = all.where((s) {
+        if ((s['category'] ?? '') == 'payment') return false;
+        final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+        return ts != null && ts.isAfter(todayStart);
+      }).toList();
+
+      today.sort((a, b) =>
+          ((a['timestamp'] ?? '') as String)
+              .compareTo((b['timestamp'] ?? '') as String));
+
+      final rows = <List<dynamic>>[
+        [
+          'Date',
+          'Time',
+          'Waiter',
+          'Customer',
+          'Item',
+          'Category',
+          'Served With',
+          'Qty',
+          'Unit Price',
+          'Total',
+          'Status',
+          'Paid With'
+        ]
+      ];
+
+      double grandTotal = 0;
+      int grandQty = 0;
+      for (var s in today) {
+        final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+        final amt = ((s['total_price'] ?? 0) as num).toDouble();
+        final qty = (s['quantity'] ?? 0) as int;
+        grandTotal += amt;
+        grandQty += qty;
+
+        final isCredit = (s['is_credit'] ?? 0) == 1;
+        final paidWith = paidSaleMethods[s['id'].toString()];
+        final pm = (s['payment_method'] ?? 'cash') as String;
+
+        String status;
+        String paidWithLabel;
+        if (isCredit && paidWith != null) {
+          status = 'PAID (Credit)';
+          paidWithLabel = payLabel(paidWith);
+        } else if (isCredit) {
+          status = 'UNPAID (Credit)';
+          paidWithLabel = '';
+        } else {
+          status = 'PAID';
+          paidWithLabel = payLabel(pm);
+        }
+
+        rows.add([
+          ts != null ? DateFormat('yyyy-MM-dd').format(ts) : '',
+          ts != null ? DateFormat('HH:mm:ss').format(ts) : '',
+          s['waiter'] ?? '',
+          s['customer'] ?? '',
+          s['item_name'] ?? '',
+          s['category'] ?? '',
+          s['served_with'] ?? '',
+          qty,
+          ((s['unit_price'] ?? 0) as num).toDouble(),
+          amt,
+          status,
+          paidWithLabel,
+        ]);
+      }
+
+      rows.add([]);
+      rows.add([
+        'TOTAL',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        grandQty,
+        '',
+        grandTotal,
+        '',
+        ''
+      ]);
+
+      final csv = const ListToCsvConverter().convert(rows);
+      final name =
+          'daily_report_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.csv';
+
+      File file;
+      final dl = Directory('/storage/emulated/0/Download');
+      if (await dl.exists()) {
+        file = File('${dl.path}/$name');
+      } else {
+        final appDir = await getDatabasesPath();
+        file = File('$appDir/$name');
+      }
+      await file.writeAsString(csv);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('CSV: ${file.path}'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 6)));
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('ስህተት: $e'), backgroundColor: Colors.red));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4438,6 +4621,13 @@ class ReportsScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.amber.shade900,
         title: const Text('ሪፖርት (ዛሬ)'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'CSV አውርድ',
+            onPressed: () => _exportCsv(context),
+          ),
+        ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: Cloud.allSalesStream(),
@@ -4488,9 +4678,8 @@ class ReportsScreen extends StatelessWidget {
             final isCredit = (s['is_credit'] ?? 0) == 1;
             final paidWith = paidSaleMethods[s['id'].toString()];
 
-            // ✅ If a credit has been paid, bucket it under the real
-            // payment method instead of "credit"
-            final effective = (isCredit && paidWith != null) ? paidWith : pm;
+            final effective =
+                (isCredit && paidWith != null) ? paidWith : pm;
 
             if (effective == 'cbe') {
               cbe += amt;
