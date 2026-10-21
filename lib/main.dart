@@ -120,6 +120,10 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _boot() async {
     await Future.delayed(const Duration(milliseconds: 500));
+    
+    // Trigger background sync of pending sales
+    DB.syncPendingSales();
+
     final prefs = await SharedPreferences.getInstance();
     final role = prefs.getString('role');
     final name = prefs.getString('waiterName');
@@ -567,41 +571,34 @@ class DB {
     ''');
 
     final menu = [
-      {'name': 'ኖርማል ፉል', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
+      {'name': 'የርማል ፉል', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'ስፔሻል ፉል', 'price': 140.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንጀራ ፍርፍር', 'price': 110.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-      {'name': 'ስፔሻል ፍርፍር', 'price': 180.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-      {'name': 'ስጋ ፍርፍር', 'price': 230.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'አንቁላል ፍርፍር', 'price': 180.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
-      {'name': 'አንቁላል ስልስ', 'price': 180.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
+      {'name': 'ስፔሻል ፍርፍር', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
+      {'name': 'አንቁላል ፍርፍር', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
+      {'name': 'አንቁላል ስልስ', 'price': 170.0, 'category': 'ቁርስ', 'served_with': 'ዳቦ'},
       {'name': 'አንቁላል በስጋ', 'price': 250.0, 'category': 'ቁርስ', 'served_with': 'እንጀራ'},
       {'name': 'በያይነት', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-      {'name': 'ፓስታ በስጎ', 'price': 110.0, 'category': 'ምሳ', 'served_with': ''},
+      {'name': 'ፓስታ በስጋ', 'price': 110.0, 'category': 'ምሳ', 'served_with': ''},
       {'name': 'ፓስታ ባትካልት', 'price': 130.0, 'category': 'ምሳ', 'served_with': ''},
-      {'name': 'ኖርማል ድንች', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'የርማል ድንች', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ጎመን', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ ፋስስ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ ፋስክ', 'price': 110.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ቲማቲም ለብለብ', 'price': 130.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ተጋቢኖ', 'price': 150.0, 'category': 'ምሳ', 'served_with': 'እንጀራ'},
       {'name': 'ስፔሻል', 'price': 230.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ጥብስ', 'price': 380.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ዱለት', 'price': 330.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ጥብስ', 'price': 350.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ዱለት', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ድንች በስጋ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ፓስታ በእንቁላል', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ግማሽ በስጎ', 'price': 160.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ግማሽ ባትክልት', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ጎመን በስጋ', 'price': 250.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሳንድዊች', 'price': 200.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ፓስታ በስጋ', 'price': 200.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ ባይባይ', 'price': 200.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ሽሮ በቅቤ', 'price': 180.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ ባይባይ', 'price': 170.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
+      {'name': 'ሽሮ በቅቤ', 'price': 150.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
       {'name': 'ቅቅል', 'price': 300.0, 'category': 'የፍስክ ምግብ', 'served_with': 'እንጀራ'},
-      {'name': 'ግማሽ አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
-      {'name': 'ዳቦ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
-      {'name': '2 ሊትር ውሃ', 'price': 70.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': '1 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': '0.5 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
-      {'name': 'ለስላሳ መጠጦች', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': 'ጎመን አንጀራ', 'price': 20.0, 'category': 'ተጨማሪ', 'served_with': 'እንጀራ'},
+      {'name': 'ዳቦ', 'price': 15.0, 'category': 'ተጨማሪ', 'served_with': 'ዳቦ'},
+      {'name': '2 ሊትር ውሃ', 'price': 60.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': '1 ሊትር ውሃ', 'price': 40.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': '0.5 ሊትር ውሃ', 'price': 25.0, 'category': 'መጠጦች', 'served_with': ''},
+      {'name': 'ለስላሳ መጠጦች', 'price': 50.0, 'category': 'መጠጦች', 'served_with': ''},
     ];
     for (var item in menu) {
       await db.insert('menu_items', item);
@@ -715,6 +712,28 @@ class DB {
         where: 'customer = ? AND voided = 0 AND category != "payment" AND timestamp BETWEEN ? AND ?',
         whereArgs: [customer, start, end],
         orderBy: 'timestamp DESC');
+  }
+
+  // ---- Sync pending sales to Firestore ----
+  static Future<int> syncPendingSales() async {
+    final db = await database;
+    final unsynced = await db.query('sales',
+        where: 'firestore_id = "" AND voided = 0');
+    int synced = 0;
+    for (final row in unsynced) {
+      try {
+        final rowMap = Map<String, dynamic>.from(row)
+          ..remove('id')
+          ..remove('firestore_id');
+        final fsId = await Cloud.pushSale(rowMap);
+        if (fsId != null) {
+          await db.update('sales', {'firestore_id': fsId},
+              where: 'id = ?', whereArgs: [row['id']]);
+          synced++;
+        }
+      } catch (_) {}
+    }
+    return synced;
   }
 }
 
@@ -1652,6 +1671,7 @@ class WaiterHistoryScreen extends StatefulWidget {
 
 class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
   String waiter = '';
+  Map<String, String> paidSaleMethods = {};
 
   @override
   void initState() {
@@ -1664,6 +1684,15 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
     setState(() => waiter = prefs.getString('waiterName') ?? '');
   }
 
+  Future<List<Map<String, dynamic>>> _loadLocal() async {
+    final db = await DB.database;
+    final all = await db.query('sales', where: 'voided = 0');
+    final statusData = computeCreditAndPaidStatus(all);
+    paidSaleMethods = (statusData['paidSaleMethods'] as Map)
+        .cast<String, String>();
+    return all;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (waiter.isEmpty) {
@@ -1674,43 +1703,35 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
       appBar: AppBar(
           backgroundColor: Colors.amber.shade900,
           title: Text('$waiter — ሽያጮቼ')),
-      body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: Cloud.allSalesStream(),
+      body: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _loadLocal(),
         builder: (ctx, snap) {
-          if (snap.hasError) {
-            return Center(
-                child: Text('ስህተት: ${snap.error}',
-                    style: const TextStyle(color: Colors.red)));
-          }
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final allRows = snap.data!;
-          final statusData = computeCreditAndPaidStatus(allRows);
-          final paidSaleMethods = (statusData['paidSaleMethods'] as Map)
-              .cast<String, String>();
-
           final now = DateTime.now();
           final todayStart = DateTime(now.year, now.month, now.day);
-          final sales = allRows
-              .where((s) =>
-                  s['waiter'] == waiter &&
-                  (s['category'] ?? '') != 'payment' &&
-                  (s['voided'] ?? 0) != 1)
-              .where((s) {
-            final ts = DateTime.tryParse((s['timestamp'] ?? '') as String);
+          final allRows = snap.data!;
+
+          final today = allRows.where((s) {
+            if ((s['category'] ?? '') == 'payment') return false;
+            if ((s['waiter'] ?? '') != waiter) return false;
+            final ts =
+                DateTime.tryParse((s['timestamp'] ?? '') as String);
             return ts != null && ts.isAfter(todayStart);
           }).toList();
 
-          if (sales.isEmpty) {
+          if (today.isEmpty) {
             return const Center(
                 child: Text('ምንም ሽያጭ የለም',
                     style: TextStyle(color: Colors.white70)));
           }
+
           double total = 0;
-          for (var s in sales) {
+          for (var s in today) {
             total += ((s['total_price'] ?? 0) as num).toDouble();
           }
+
           return Column(
             children: [
               Container(
@@ -1724,7 +1745,7 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
                             color: Colors.amber,
                             fontSize: 24,
                             fontWeight: FontWeight.bold)),
-                    Text('${sales.length} ሽያጭ',
+                    Text('${today.length} ሽያጭ',
                         style: const TextStyle(
                             color: Colors.white70, fontSize: 12)),
                   ],
@@ -1732,9 +1753,9 @@ class _WaiterHistoryScreenState extends State<WaiterHistoryScreen> {
               ),
               Expanded(
                 child: ListView.builder(
-                  itemCount: sales.length,
+                  itemCount: today.length,
                   itemBuilder: (ctx, i) {
-                    final s = sales[i];
+                    final s = today[i];
                     final ts = DateTime.tryParse(
                         (s['timestamp'] ?? '') as String);
                     final pm =
@@ -1974,6 +1995,51 @@ class _OwnerScreenState extends State<OwnerScreen> {
               );
             },
           ),
+          
+          // ---- Sync Pending Banner ----
+          FutureBuilder<int>(
+            future: DB.database.then((db) => db
+                .query('sales', where: 'firestore_id = "" AND voided = 0')
+                .then((r) => r.length)),
+            builder: (ctx, snap) {
+              final count = snap.data ?? 0;
+              if (count == 0) return const SizedBox.shrink();
+              return Container(
+                margin: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade900.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_off, color: Colors.orange, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$count ሽያጭ ወደ Cloud አልተላከም',
+                        style: const TextStyle(color: Colors.orange, fontSize: 12),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        final synced = await DB.syncPendingSales();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('✅ $synced ተላከ'),
+                          backgroundColor: Colors.green,
+                        ));
+                        setState(() {}); // rebuild to hide banner
+                      },
+                      child: const Text('Sync', style: TextStyle(color: Colors.amber)),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: Cloud.allSalesStream(),
@@ -4305,7 +4371,7 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 }
 
-// ==================== HISTORY SCREEN (Cloud-aware + delete) ====================
+// ==================== HISTORY SCREEN (Local SQLite) ====================
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
   @override
@@ -4314,17 +4380,37 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   String waiter = '';
+  List<Map<String, dynamic>> sales = [];
+  Map<String, String> paidSaleMethods = {};
+  bool loading = true;
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _load();
   }
 
-  Future<void> _init() async {
+  Future<void> _load() async {
+    setState(() => loading = true);
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() => waiter = prefs.getString('waiterName') ?? '');
+    waiter = prefs.getString('waiterName') ?? '';
+
+    final db = await DB.database;
+    final allRows = await db.query('sales', where: 'voided = 0');
+
+    final statusData = computeCreditAndPaidStatus(allRows);
+    paidSaleMethods = (statusData['paidSaleMethods'] as Map)
+        .cast<String, String>();
+
+    sales = allRows
+        .where((s) =>
+            s['waiter'] == waiter && (s['category'] ?? '') != 'payment')
+        .toList();
+    sales.sort((a, b) =>
+        ((b['timestamp'] ?? '') as String)
+            .compareTo((a['timestamp'] ?? '') as String));
+
+    if (mounted) setState(() => loading = false);
   }
 
   Future<void> _deleteSale(Map<String, dynamic> sale) async {
@@ -4332,8 +4418,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF2A2A2A),
-        title:
-            const Text('ማረጋገጫ', style: TextStyle(color: Colors.amber)),
+        title: const Text('ማረጋገጫ',
+            style: TextStyle(color: Colors.amber)),
         content: Text(
             '${sale['item_name']} × ${sale['quantity']} ይሰረዝ?',
             style: const TextStyle(color: Colors.white)),
@@ -4342,8 +4428,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('አይ')),
           ElevatedButton(
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('አዎ')),
         ],
@@ -4351,17 +4436,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
     if (ok != true) return;
 
-    final fsId = sale['id'] as String?;
+    final fsId = sale['firestore_id'] as String?;
     if (fsId != null && fsId.isNotEmpty) {
-      try {
-        await Cloud.voidSale(fsId);
-      } catch (_) {}
-      try {
-        final db = await DB.database;
-        await db.delete('sales',
-            where: 'firestore_id = ?', whereArgs: [fsId]);
-      } catch (_) {}
+      try { await Cloud.voidSale(fsId); } catch (_) {}
     }
+    await DB.deleteSale(sale['id'] as int);
+    await _load();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('✅ ተሰርዟል'), backgroundColor: Colors.green));
@@ -4374,50 +4454,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
         backgroundColor: Colors.amber.shade900,
         title: Text(
             'የሽያጭ ታሪክ${waiter.isEmpty ? "" : " — $waiter"}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _load,
+          ),
+        ],
       ),
-      body: waiter.isEmpty
+      body: loading
           ? const Center(child: CircularProgressIndicator())
-          : StreamBuilder<List<Map<String, dynamic>>>(
-              stream: Cloud.allSalesStream(),
-              builder: (ctx, snap) {
-                if (snap.hasError) {
-                  return Center(
-                      child: Text('ስህተት: ${snap.error}',
-                          style: const TextStyle(color: Colors.red)));
-                }
-                if (!snap.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final allRows = snap.data!;
-                final statusData = computeCreditAndPaidStatus(allRows);
-                final paidSaleMethods = (statusData['paidSaleMethods'] as Map)
-                    .cast<String, String>();
-
-                final sales = allRows
-                    .where((s) =>
-                        s['waiter'] == waiter &&
-                        (s['category'] ?? '') != 'payment' &&
-                        (s['voided'] ?? 0) != 1)
-                    .toList();
-
-                sales.sort((a, b) =>
-                    ((b['timestamp'] ?? '') as String)
-                        .compareTo((a['timestamp'] ?? '') as String));
-
-                if (sales.isEmpty) {
-                  return const Center(
-                      child: Text('ምንም ሽያጭ የለም',
-                          style: TextStyle(color: Colors.white70)));
-                }
-
-                return ListView.builder(
+          : sales.isEmpty
+              ? const Center(
+                  child: Text('ምንም ሽያጭ የለም',
+                      style: TextStyle(color: Colors.white70)))
+              : ListView.builder(
                   itemCount: sales.length,
                   itemBuilder: (ctx, i) {
                     final s = sales[i];
-                    final ts =
-                        DateTime.tryParse((s['timestamp'] ?? '') as String);
-                    final pm = (s['payment_method'] ?? 'cash') as String;
+                    final ts = DateTime.tryParse(
+                        (s['timestamp'] ?? '') as String);
+                    final pm =
+                        (s['payment_method'] ?? 'cash') as String;
                     final isCredit = (s['is_credit'] ?? 0) == 1;
                     final paidWith = paidSaleMethods[s['id'].toString()];
 
@@ -4450,7 +4507,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       ? DateFormat('MMM d, HH:mm').format(ts)
                                       : '',
                                   style: const TextStyle(
-                                      color: Colors.white54, fontSize: 11)),
+                                      color: Colors.white54,
+                                      fontSize: 11)),
                               badge,
                               if ((s['customer'] ?? '') != '')
                                 Text('👤 ${s['customer']}',
@@ -4480,9 +4538,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ),
                     );
                   },
-                );
-              },
-            ),
+                ),
     );
   }
 }
@@ -4677,7 +4733,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 final now = DateTime.now();
                 final todayStart = DateTime(now.year, now.month, now.day);
 
-                // ✅ Only this waiter's sales for today
                 final today = all.where((s) {
                   if ((s['category'] ?? '') == 'payment') return false;
                   if ((s['waiter'] ?? '') != waiter) return false;
